@@ -1,0 +1,647 @@
+---
+title: "Mixture Models Analysis"
+author: "Rachel Broughton"
+date: "2025-03-19"
+output: html_document
+---
+
+## Setup Environment
+```{r setup, include=FALSE}
+rm(list = ls())
+
+# load pacakges
+library(tidyverse)
+library(data.table)
+# library(dplyr)
+# library(tidyr)
+library(readxl)
+library(tcplfit2)
+library(tcpl)
+library(gridExtra)
+library(ggplot2)
+library(scales)
+library(grid)
+
+# set up connections to ToxCast database
+tcplConf("_dataminer", pass="pass", db="prod_internal_invitrodb_v4_2", drvr="MySQL", host="ccte-mysql-res.dmap-prod.aws.epa.gov")
+tcplConfList()
+
+# import scripts with functions
+source("./scripts/curve_fitting_functions.R")
+source("./scripts/mixture_model_functions.R")
+
+```
+
+## Load data from test dataset
+```{r}
+#Pull mixtures data based on spids of experiment "EPA-68HE0B21P0625"
+# mc0 <- tcplPrepOtpt(tcplLoadData(lvl = 0 , fld = "acid", val = c(32:92, 94:113))) #pull level 0 (raw data)for all atg endpoints
+# new.mc0 <- mc0[grep("EPA-68HE0B21P0625", mc0$srcf),] #filter for task order # within source file name colunn
+# 
+# # select only "test" chemicals and not "reference" by removing dsstox_substance_id = NA
+# mc0.filter <- new.mc0[!is.na(dsstox_substance_id)]
+# 
+# spids <- unique(mc0.filter$spid)
+
+# have spid values for mixture experiment pre-saved
+load("./input/mixture_spids.Rdata")
+
+# Load test dataset from this experiment
+mc3 <- tcplPrepOtpt(tcplLoadData(lvl=3, type='mc', fld='spid', val=spids))
+mc4 <- tcplPrepOtpt(tcplLoadData(lvl=4,type='mc', fld='spid', val=spids))
+mc5 <- tcplPrepOtpt(tcplLoadData(lvl=5,type='mc', fld='spid', val=spids))
+mc4_agg <- tcplPrepOtpt(tcplLoadData(lvl="agg",type='mc', fld='spid', val=spids))
+# add flags
+mc6 <- tcplPrepOtpt(tcplLoadData(lvl=6, fld='spid', val=spids, type='mc'))
+setDT(mc6)
+mc6_mthds <- mc6[ , .( mc6_mthd_id = paste(mc6_mthd_id, collapse=",")), by = m4id]
+mc6_flags <- mc6[ , .( flag = paste(flag, collapse=";")), by = m4id]
+mc5$mc6_flags <- mc6_mthds$mc6_mthd_id[match(mc5$m4id, mc6_mthds$m4id)]
+mc5[, flag.length := ifelse(!is.na(mc6_flags), count.fields(textConnection(mc6_flags), sep =','), NA)]
+
+# Map mixtures to single chemical components
+# 11 single chemicals (plus unused Retinoic acid) over 81 endpoints (aeid=63-144)
+# 21 mixtures over 81 endpoints (aeid=63-144)
+ES219_key <- read_excel("./input/ATG_mixtures_upload.xlsx",  sheet = "ES219_key")
+mixtures_uploads <- read_excel("./input/ATG_mixtures_upload.xlsx",  sheet = "Mixtures_upload")
+mixtures_key <- merge(ES219_key, mixtures_uploads, by.x="BOTTLE_ID", by.y="Barcode_mixture")
+
+# separate single chemicals and mixtures by DTXSID
+mc5.single <- mc5 %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.y)
+mc5.mixture <- mc5 %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.x)
+
+# filter for active mixtures with hitc >= 0.9 and non-negative (curve goes from zero to positive max only for now)
+mc5.mixture.filter <- mc5.mixture %>% filter(hitc >= 0.9 & top>=0)
+
+# Load all mc5 level data for Attagene endpoints
+# for finding maximum endpoint 'top' response over all of Attagene by endpoint to use for normalization
+mc5_attg_endpts <- tcplPrepOtpt(tcplLoadData(lvl=5, type = 'mc', fld='aeid',val=c(63:144)))
+
+```
+
+## Select and load single component data from legacy ToxCast database
+Same component chemicals, but from legacy ToxCast (and same test mixtures)
+```{r}
+# load saved selected spids instead of running each time
+load("./input/mixture_spids_tc.Rdata")
+
+# Load other mc levels for the subset of toxcast nonmixture data
+mc3_tcsubset <- tcplPrepOtpt(tcplLoadData(lvl=3, type = 'mc', fld='spid',val=spids_tc))
+mc4_tcsubset <- tcplPrepOtpt(tcplLoadData(lvl=4, type = 'mc', fld='spid',val=spids_tc))
+mc4_agg_tcsubset <- tcplPrepOtpt(tcplLoadData(lvl="agg", type = 'mc', fld='spid',val=spids_tc))
+
+# select data from legacy ToxCast for plotting (even those not analyzed with models)
+tc_mc5_notmix <- mc5_attg_endpts %>% filter(!(spid %in% spids))
+setDT(tc_mc5_notmix)
+tc_mc5_notmix_filter <- tcplSubsetChid(tc_mc5_notmix)
+```
+
+## Load dataframes of stored results
+Mixtures information, single component information, and model results are calculated in the mixtures_analysis.Rmd file
+```{r}
+# load mix.info data frames with test dataset information
+load("./output/mix_info.Rdata")
+# load mix.info.tc data frames with legacy ToxCast data information
+load("./output/mix_info_tc.Rdata")
+# load single.info data frames with test dataset component information
+load("./output/single_info.Rdata")
+# load single.info.tc data frames with legacy ToxCast component information
+load("./output/single_info_tc.Rdata")
+# load mixture model results for ACC estimates
+load("./output/mix_results_acc.Rdata")
+#load mixture model results for full concentration-response curve predictions
+load("./output/mix_results_all.Rdata")
+
+# load alternate models for poly2 curves that have responses <0  and a positive top response 
+# load("./input/poly2_new_modl.Rdata")
+
+```
+
+## Filter and sort active versus inactive components and mixtures
+```{r}
+# Test dataset
+mc5_mix_all <- mc5 %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.x)
+mc5_sing <- mc5 %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.y)
+# mc5_sing_tc <- tc_mc5_notmix_filter %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.y)
+
+# sort mixtures by active and inactive single components
+for (qq in 1:nrow(mc5_mix_all)){
+  # relate mixture to single components and identify by m4id
+  dtxsids <- mixtures_key[mixtures_key$DTXSID.x == mc5_mix_all$dsstox_substance_id[qq], ]$DTXSID.y
+  mc5_mix_all$m4id_1[qq] <- mc5[(dsstox_substance_id==dtxsids[1] & aeid == mc5_mix_all$aeid[qq]),]$m4id
+  mc5_mix_all$m4id_2[qq] <- mc5[(dsstox_substance_id==dtxsids[2] & aeid == mc5_mix_all$aeid[qq]),]$m4id
+  mc5_mix_all$fitc_1[qq] <- mc5[(dsstox_substance_id==dtxsids[1] & aeid == mc5_mix_all$aeid[qq]),]$fitc
+  mc5_mix_all$fitc_2[qq] <- mc5[(dsstox_substance_id==dtxsids[2] & aeid == mc5_mix_all$aeid[qq]),]$fitc
+}
+
+# remove active chemicals with negative dominant response
+mc5_mix_1 <- mc5_mix_all %>% filter(!(hitc>=0.9 & top<0))
+# remove mixtures with active components with negative response
+mc5_sing_act_neg <- mc5_sing %>% filter(hitc >= 0.9 & top<0)
+mc5_mix_2 <- mc5_mix_1 %>% filter(!(m4id_1 %in% mc5_sing_act_neg$m4id) & !(m4id_2 %in% mc5_sing_act_neg$m4id))
+# remove active fitc=40 components (no slope data captured)
+single_comp_40 <- mc5_sing %>% filter(fitc == 40 | fitc==36)
+mc5_mix <- subset(mc5_mix_2,!(m4id_1 %in% single_comp_40$m4id)& !(m4id_2 %in% single_comp_40$m4id))
+# remove strangely behaving mixture
+mc5_mix <- subset(mc5_mix,!(m4id==12837598))
+
+# select all single components that can be used to make a mixture curve prediction (active, positive dominant response, data captures slope)
+mc5_sing_act <- mc5_sing %>% filter(hitc >= 0.9 & top>0 & !(fitc==40))
+# number of active mixtures
+mix_act <- mc5_mix %>% filter(hitc>=0.9)
+# number of inactive mixtures
+mix_inact <- mc5_mix %>% filter(hitc<0.9)
+
+# active mixtures with at least 1 active single component
+mix_act_single_act <- mix_act %>% filter((m4id_1 %in% mc5_sing_act$m4id)|(m4id_2 %in% mc5_sing_act$m4id))
+# active mixtures with no active single components
+mix_act_single_inact <- mix_act %>% filter(!(m4id_1 %in% mc5_sing_act$m4id) & !(m4id_2 %in% mc5_sing_act$m4id))
+# inactive mixtures with no active single components
+mix_inact_single_inact <- mix_inact %>% filter(!(m4id_1 %in% mc5_sing_act$m4id) & !(m4id_2 %in% mc5_sing_act$m4id))
+# inactive mixtures with active single components
+mix_inact_single_act <- mix_inact %>% filter((m4id_1 %in% mc5_sing_act$m4id)|(m4id_2 %in% mc5_sing_act$m4id))
+# count borderline hitcalls
+mix_act_single_inact.border <- mix_act_single_inact %>% filter((fitc %in% c(36,37,38))|(fitc_1 == 15)|(fitc_2==15))
+mix_inact_single_act.border <- mix_inact_single_act %>% filter((fitc==15)|
+                                                                 (fitc_1 %in% c(36,37,38))|
+                                                                 (fitc_2 %in% c(36,37,38)))
+
+# Repeat with ToxCast chemical library
+mc5_mix_all <- mc5 %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.x)
+mc5_sing_tc <- tc_mc5_notmix_filter %>% filter((dsstox_substance_id %in% mixtures_key$DTXSID.y) & (aeid %in% mc5_mix_all$aeid))
+
+# sort mixtures by active and inactive single components
+for (qq in 1:nrow(mc5_mix_all)){
+  # relate mixture to single components and identify by m4id
+  dtxsids <- mixtures_key[mixtures_key$DTXSID.x == mc5_mix_all$dsstox_substance_id[qq], ]$DTXSID.y
+  mc5_mix_all$m4id_1[qq] <- mc5_sing_tc[(dsstox_substance_id==dtxsids[1] & aeid == mc5_mix_all$aeid[qq]),]$m4id
+  mc5_mix_all$m4id_2[qq] <- mc5_sing_tc[(dsstox_substance_id==dtxsids[2] & aeid == mc5_mix_all$aeid[qq]),]$m4id
+  mc5_mix_all$fitc_1[qq] <- mc5_sing_tc[(dsstox_substance_id==dtxsids[1] & aeid == mc5_mix_all$aeid[qq]),]$fitc
+  mc5_mix_all$fitc_2[qq] <- mc5_sing_tc[(dsstox_substance_id==dtxsids[2] & aeid == mc5_mix_all$aeid[qq]),]$fitc
+}
+
+# remove active chemicals with negative dominant response
+mc5_mix_1 <- mc5_mix_all %>% filter(!(hitc>=0.9 & top<0))
+# remove mixtures with active components with negative response
+mc5_sing_act_neg <- mc5_sing_tc %>% filter(hitc >= 0.9 & top<0)
+mc5_mix_2 <- mc5_mix_1 %>% filter(!(m4id_1 %in% mc5_sing_act_neg$m4id) & !(m4id_2 %in% mc5_sing_act_neg$m4id))
+# remove active fitc=40 components (no slope data captured)
+single_comp_40 <- mc5_sing_tc %>% filter(fitc==40 | fitc==36)
+mc5_mix_tc <- subset(mc5_mix_2,!(m4id_1 %in% single_comp_40$m4id)& !(m4id_2 %in% single_comp_40$m4id))
+# remove strangely behaving mixture and remove mixtures with strangely behaving TC single component
+mc5_mix_tc <- subset(mc5_mix_tc,!(m4id==12837598) & !(m4id_1==12518380) & !(m4id_2==12518380))
+
+# select all single components that can be used to make a mixture curve prediction (active, positive dominant response, data captures slope)
+mc5_sing_act_tc <- mc5_sing_tc %>% filter(hitc >= 0.9 & top>0 & !(fitc==40))
+# number of active mixtures
+mix_act_tc <- mc5_mix_tc %>% filter(hitc>=0.9)
+# number of inactive mixtures
+mix_inact_tc <- mc5_mix_tc %>% filter(hitc<0.9)
+
+# active mixtures with at least 1 active single component
+mix_act_single_act_tc <- mix_act_tc %>% filter((m4id_1 %in% mc5_sing_act_tc$m4id)|(m4id_2 %in% mc5_sing_act_tc$m4id))
+# active mixtures with no active single components
+mix_act_single_inact_tc <- mix_act_tc %>% filter(!(m4id_1 %in% mc5_sing_act_tc$m4id) & !(m4id_2 %in% mc5_sing_act_tc$m4id))
+# inactive mixtures with no active single components
+mix_inact_single_inact_tc <- mix_inact_tc %>% filter(!(m4id_1 %in% mc5_sing_act_tc$m4id) & !(m4id_2 %in% mc5_sing_act_tc$m4id))
+# inactive mixtures with active single components
+mix_inact_single_act_tc <- mix_inact_tc %>% filter((m4id_1 %in% mc5_sing_act_tc$m4id)|(m4id_2 %in% mc5_sing_act_tc$m4id))
+# count borderline hitcalls
+mix_act_single_inact.border_tc <- mix_act_single_inact_tc %>% filter((fitc %in% c(36,37,38))|(fitc_1 == 15)|(fitc_2==15))
+mix_inact_single_act.border_tc <- mix_inact_single_act_tc %>% filter((fitc==15)|
+                                                                 (fitc_1 %in% c(36,37,38))|
+                                                                 (fitc_2 %in% c(36,37,38)))
+
+# compare this experiment and ToxCast activity results
+sing_tc_compare <- merge(mc5_sing[,c("dsstox_substance_id","aeid","m4id","hitc","hitcall","top","fitc")],
+                         mc5_sing_tc[,c("dsstox_substance_id","aeid","m4id","hitc","hitcall","top","fitc")],
+                         by=c("dsstox_substance_id","aeid"),suffixes=c(".ex",".tc"))
+sing_tc_compare <- sing_tc_compare %>% filter(!(hitcall.ex>=0.9 & top.ex<0) & !(hitcall.tc>=0.9 & top.tc<0))
+sing_both_inact <- sing_tc_compare %>% filter(hitcall.ex < 0.9 & hitcall.tc < 0.9)
+sing_both_act <- sing_tc_compare %>% filter(hitcall.ex >= 0.9 & hitcall.tc >= 0.9)
+sing_exact_tcinact <- sing_tc_compare %>% filter(hitcall.ex >= 0.9 & hitcall.tc < 0.9)
+sing_exinact_tcact <- sing_tc_compare %>% filter(hitcall.ex < 0.9 & hitcall.tc >= 0.9)
+sing_exact_tcinact.border <- sing_exact_tcinact %>% filter((fitc.tc==15)|(fitc.ex %in% c(36,37,38)))
+sing_exinact_tcact.border <-  sing_exinact_tcact %>% filter((fitc.ex==15)|(fitc.tc %in% c(36,37,38)))
+```
+
+## Evaluate fit quality for ACC values
+```{r}
+mix.results.acc$acc_single <- mc5_attg_endpts$acc[match(mix.results.all$potent_sing_id,mc5_attg_endpts$m4id)]
+mix.results.acc$acc_single.tc <- mc5_attg_endpts$acc[match(mix.results.all$potent_sing_id.tc,mc5_attg_endpts$m4id)]
+fit_quality <- data.frame(m4id_mix=mix.results.all$m4id_mix)
+
+# ACC differences
+fit_quality$diff_acc_ca <- log10(mix.results.acc$acc_mix)-log10(mix.results.acc$acc_ca)
+fit_quality$diff_acc_ia <- log10(mix.results.acc$acc_mix)-log10(mix.results.acc$acc_ia)
+fit_quality$diff_acc_single <- log10(mix.results.acc$acc_mix)-log10(mix.results.acc$acc_single)
+
+fit_quality$diff_acc_ca.tc <- log10(mix.results.acc$acc_mix)-log10(mix.results.acc$acc_ca.tc)
+fit_quality$diff_acc_ia.tc <- log10(mix.results.acc$acc_mix)-log10(mix.results.acc$acc_ia.tc)
+fit_quality$diff_acc_single.tc <- log10(mix.results.acc$acc_mix)-log10(mix.results.acc$acc_single.tc)
+
+# bootstrap of ACC differences
+for (ii in 1:nrow(mix.results.acc)){
+  if (!(fit_quality$m4id_mix[ii] %in% mix.info$m4id_mix)){
+    fit_quality$diff_acc_boot_ca[ii] <- NA
+    fit_quality$diff_acc_boot_ia[ii] <- NA
+    fit_quality$diff_acc_boot_single[ii] <- NA
+    fit_quality$diff_acc_bayes_ca[ii] <- NA
+    fit_quality$diff_acc_bayes_ia[ii] <- NA
+    fit_quality$diff_acc_bayes_single[ii] <- NA
+  } else {
+    fit_quality$diff_acc_boot_ca[ii] <- list(mix.results.acc$acc_boot_mix[[ii]]/
+                                               sample(mix.results.acc$acc_boot_ca[[ii]]))
+    fit_quality$diff_acc_boot_ia[ii] <- list(mix.results.acc$acc_boot_mix[[ii]]/
+                                               sample(mix.results.acc$acc_boot_ia[[ii]]))
+    fit_quality$diff_acc_boot_single[ii] <- list(mix.results.acc$acc_boot_mix[[ii]]/
+                                               sample(mix.results.acc$acc_boot_single[[ii]]))
+    fit_quality$diff_acc_bayes_ca[ii] <- list(mix.results.acc$acc_bayes_mix[[ii]]/
+                                               sample(mix.results.acc$acc_bayes_ca[[ii]]))
+    fit_quality$diff_acc_bayes_ia[ii] <- list(mix.results.acc$acc_bayes_mix[[ii]]/
+                                               sample(mix.results.acc$acc_bayes_ia[[ii]]))
+    fit_quality$diff_acc_bayes_single[ii] <- list(mix.results.acc$acc_bayes_mix[[ii]]/
+                                               sample(mix.results.acc$acc_bayes_single[[ii]]))
+  }
+  # repeat for TC library
+  if (!(fit_quality$m4id_mix[ii] %in% mix.info.tc$m4id_mix)){
+    fit_quality$diff_acc_boot_ca.tc[ii] <- NA
+    fit_quality$diff_acc_boot_ia.tc[ii] <- NA
+    fit_quality$diff_acc_boot_single.tc[ii] <- NA
+    fit_quality$diff_acc_bayes_ca.tc[ii] <- NA
+    fit_quality$diff_acc_bayes_ia.tc[ii] <- NA
+    fit_quality$diff_acc_bayes_single.tc[ii] <- NA
+  } else {
+    fit_quality$diff_acc_boot_ca.tc[ii] <- list(mix.results.acc$acc_boot_mix[[ii]]/
+                                               sample(mix.results.acc$acc_boot_ca.tc[[ii]]))
+    fit_quality$diff_acc_boot_ia.tc[ii] <- list(mix.results.acc$acc_boot_mix[[ii]]/
+                                               sample(mix.results.acc$acc_boot_ia.tc[[ii]]))
+    fit_quality$diff_acc_boot_single.tc[ii] <- list(mix.results.acc$acc_boot_mix[[ii]]/
+                                               sample(mix.results.acc$acc_boot_single.tc[[ii]]))
+    fit_quality$diff_acc_bayes_ca.tc[ii] <- list(mix.results.acc$acc_bayes_mix[[ii]]/
+                                               sample(mix.results.acc$acc_bayes_ca.tc[[ii]]))
+    fit_quality$diff_acc_bayes_ia.tc[ii] <- list(mix.results.acc$acc_bayes_mix[[ii]]/
+                                               sample(mix.results.acc$acc_bayes_ia.tc[[ii]]))
+    fit_quality$diff_acc_bayes_single.tc[ii] <- list(mix.results.acc$acc_bayes_mix[[ii]]/
+                                               sample(mix.results.acc$acc_bayes_single.tc[[ii]]))
+  }
+
+}
+
+
+
+boot_ca_conserv <- calc_int_metric(results=fit_quality$diff_acc_boot_ca,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_boot_ca))
+boot_ia_conserv <- calc_int_metric(results=fit_quality$diff_acc_boot_ia,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_boot_ia))
+boot_single_conserv <- calc_int_metric(results=fit_quality$diff_acc_boot_single,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_boot_single))
+
+boot_ca_accur <- calc_int_metric(results=fit_quality$diff_acc_boot_ca,conserv=F)/sum(!is.na(fit_quality$diff_acc_boot_ca))
+boot_ia_accur <- calc_int_metric(results=fit_quality$diff_acc_boot_ia,conserv=F)/sum(!is.na(fit_quality$diff_acc_boot_ia))
+boot_single_accur <- calc_int_metric(results=fit_quality$diff_acc_boot_single,conserv=F)/sum(!is.na(fit_quality$diff_acc_boot_single))
+
+bayes_ca_conserv <- calc_int_metric(results=fit_quality$diff_acc_bayes_ca,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_bayes_ca))
+bayes_ia_conserv <- calc_int_metric(results=fit_quality$diff_acc_bayes_ia,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_bayes_ia))
+bayes_single_conserv <- calc_int_metric(results=fit_quality$diff_acc_bayes_single,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_bayes_single))
+
+bayes_ca_accur <- calc_int_metric(results=fit_quality$diff_acc_bayes_ca,conserv=F)/sum(!is.na(fit_quality$diff_acc_bayes_ca))
+bayes_ia_accur <- calc_int_metric(results=fit_quality$diff_acc_bayes_ia,conserv=F)/sum(!is.na(fit_quality$diff_acc_bayes_ia))
+bayes_single_accur <- calc_int_metric(results=fit_quality$diff_acc_bayes_single,conserv=F)/sum(!is.na(fit_quality$diff_acc_bayes_single))
+
+# repeat for TC library
+boot_ca_conserv.tc <- calc_int_metric(results=fit_quality$diff_acc_boot_ca.tc,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_boot_ca.tc))
+boot_ia_conserv.tc <- calc_int_metric(results=fit_quality$diff_acc_boot_ia.tc,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_boot_ia.tc))
+boot_single_conserv.tc <- calc_int_metric(results=fit_quality$diff_acc_boot_single.tc,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_boot_single.tc))
+
+boot_ca_accur.tc <- calc_int_metric(results=fit_quality$diff_acc_boot_ca.tc,conserv=F)/sum(!is.na(fit_quality$diff_acc_boot_ca.tc))
+boot_ia_accur.tc <- calc_int_metric(results=fit_quality$diff_acc_boot_ia.tc,conserv=F)/sum(!is.na(fit_quality$diff_acc_boot_ia.tc))
+boot_single_accur.tc <- calc_int_metric(results=fit_quality$diff_acc_boot_single.tc,conserv=F)/sum(!is.na(fit_quality$diff_acc_boot_single.tc))
+
+bayes_ca_conserv.tc <- calc_int_metric(results=fit_quality$diff_acc_bayes_ca.tc,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_bayes_ca.tc))
+bayes_ia_conserv.tc <- calc_int_metric(results=fit_quality$diff_acc_bayes_ia.tc,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_bayes_ia.tc))
+bayes_single_conserv.tc <- calc_int_metric(results=fit_quality$diff_acc_bayes_single.tc,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_bayes_single.tc))
+
+bayes_ca_accur.tc <- calc_int_metric(results=fit_quality$diff_acc_bayes_ca.tc,conserv=F)/sum(!is.na(fit_quality$diff_acc_bayes_ca.tc))
+bayes_ia_accur.tc <- calc_int_metric(results=fit_quality$diff_acc_bayes_ia.tc,conserv=F)/sum(!is.na(fit_quality$diff_acc_bayes_ia.tc))
+bayes_single_accur.tc <- calc_int_metric(results=fit_quality$diff_acc_bayes_single.tc,conserv=F)/sum(!is.na(fit_quality$diff_acc_bayes_single.tc))
+
+# Bayesian prediction interval coverage of ACC
+
+pred_ca_cover <- calc_predint_metric(results=mix.results.acc$acc_pred_ca)
+pred_ca_cover.tc <- calc_predint_metric(results=mix.results.acc$acc_pred_ca.tc)
+
+pred_ia_cover <- calc_predint_metric(results=mix.results.acc$acc_pred_ia)
+pred_ia_cover.tc <- calc_predint_metric(results=mix.results.acc$acc_pred_ia.tc)
+
+pred_single_cover <- calc_predint_metric(results=mix.results.acc$acc_pred_single)
+pred_single_cover.tc <- calc_predint_metric(results=mix.results.acc$acc_pred_single.tc)
+
+# compile metrics into tables
+table1_acc_accurate <- data.frame(ca=c(100*point_fit_metric(fit_quality$diff_acc_ca,conserv=FALSE),
+                                       100*boot_ca_accur,100*bayes_ca_accur,100*pred_ca_cover),
+                                 ia=c(100*point_fit_metric(fit_quality$diff_acc_ia,conserv=FALSE),
+                                      100*boot_ia_accur,100*bayes_ia_accur,100*pred_ia_cover),
+                                 single=c(100*point_fit_metric(fit_quality$diff_acc_single,conserv=FALSE),
+                                          100*boot_single_accur,100*bayes_single_accur,
+                                          100*pred_single_cover),
+                                 ca.tc=c(100*point_fit_metric(fit_quality$diff_acc_ca.tc,conserv=FALSE),
+                                         100*boot_ca_accur.tc,100*bayes_ca_accur.tc,100*pred_ca_cover.tc),
+                                 ia.tc=c(100*point_fit_metric(fit_quality$diff_acc_ia.tc,conserv=FALSE),
+                                         100*boot_ia_accur.tc,100*bayes_ia_accur.tc,100*pred_ia_cover.tc),
+                                 single.tc=c(100*point_fit_metric(fit_quality$diff_acc_single.tc,conserv=FALSE),
+                                             100*boot_single_accur.tc,100*bayes_single_accur.tc,
+                                             100*pred_single_cover.tc))
+
+table2_acc_conserv <- data.frame(ca=c(100*point_fit_metric(fit_quality$diff_acc_ca),
+                                      100*boot_ca_conserv,100*bayes_ca_conserv),
+                                 ia=c(100*point_fit_metric(fit_quality$diff_acc_ia),
+                                      100*boot_ia_conserv,100*bayes_ia_conserv),
+                                 single=c(100*point_fit_metric(fit_quality$diff_acc_single),
+                                          100*boot_single_conserv,100*bayes_single_conserv),
+                                 ca.tc=c(100*point_fit_metric(fit_quality$diff_acc_ca.tc),
+                                         100*boot_ca_conserv.tc,100*bayes_ca_conserv.tc),
+                                 ia.tc=c(100*point_fit_metric(fit_quality$diff_acc_ia.tc),
+                                         100*boot_ia_conserv.tc,100*bayes_ia_conserv.tc),
+                                 single.tc=c(100*point_fit_metric(fit_quality$diff_acc_single.tc),
+                                             100*boot_single_conserv.tc,100*bayes_single_conserv.tc))
+```
+
+## Evaluate fit quality for full curves
+```{r}
+# Residual Sum of Squares ratios
+fit_quality$rss_ratio_ca <- NA
+fit_quality$rss_ratio_ia <- NA
+fit_quality$rss_ratio_sing <- NA  
+fit_quality$rss_ratio_ca.tc <- NA
+fit_quality$rss_ratio_ia.tc <- NA
+fit_quality$rss_ratio_sing.tc <- NA
+# 95% Confidence Interval overlap
+fit_quality$ca_boot_overlap <- NA
+fit_quality$ia_boot_overlap <- NA
+fit_quality$single_boot_overlap <- NA
+fit_quality$ca_bayes_overlap <- NA
+fit_quality$ia_bayes_overlap <- NA
+fit_quality$single_bayes_overlap <- NA
+fit_quality$ca_boot_overlap.tc <- NA
+fit_quality$ia_boot_overlap.tc <- NA
+fit_quality$single_boot_overlap.tc <- NA
+fit_quality$ca_bayes_overlap.tc <- NA
+fit_quality$ia_bayes_overlap.tc <- NA
+fit_quality$single_bayes_overlap.tc <- NA
+# 95% Prediction Interval Coverage
+fit_quality$ia_coverage <- NA
+fit_quality$ca_coverage <- NA
+fit_quality$single_coverage <- NA
+fit_quality$ia_coverage.tc <- NA
+fit_quality$ca_coverage.tc <- NA
+fit_quality$single_coverage.tc <- NA
+for (jj in 1:nrow(mix.results.all)){
+  # mixture data
+  mix_dat <- mc3 %>% filter(m3id %in% mc4_agg$m3id[which(mc4_agg$m4id==mix.results.all$m4id_mix[jj])])
+  # select concentration up to mixture maximum
+  mix_info <- mc5[m4id==mix.results.all$m4id_mix[jj],]
+  x_vals <- seq(min(mix_dat$conc),max(mix_dat$conc),length.out=500)
+  mix_model <- toxcast_model(dat=mix_info,params=mix_info,XX=x_vals)
+  mix_top_loc <- x_vals[which.max(mix_model)]
+  dat_eval <- subset(mix_dat, conc<=mix_top_loc)
+  if (mix.results.all$m4id_mix[jj] %in% mix.info$m4id_mix){
+    norm_factor <- mix.info[mix.info$m4id_mix==mix.results.all$m4id_mix[jj],]$edpt_top
+    sing_info <- mc5_attg_endpts[m4id==mix.results.all$potent_sing_id[jj],]
+    
+    # Residual Sum of Squares ratios
+    ca_curve <- mix.results.all$ca_curve[[jj]]
+    ia_curve <- mix.results.all$ia_curve[[jj]]
+    single_curve <- mix.results.all$potent_single[[jj]]
+    # select only concentrations where the models are valid
+    tol <- 1E-5 # tolerance for comparing equal to (<=)
+    dat_eval_ca <- subset(dat_eval,conc<=(max(ca_curve$conc,na.rm=T)+tol))
+    dat_eval_ia <- subset(dat_eval,conc<=(max(ia_curve$conc,na.rm=T)+tol))
+    dat_eval_single <- subset(dat_eval,conc<=(max(single_curve$conc,na.rm=T)+tol))
+    # evaluate models at observed concentrations
+    ca_y_eval <- ifelse(dat_eval_ca$conc<min(ca_curve$conc,na.rm=TRUE),0,approx(x=ca_curve$conc, y=ca_curve$resp/norm_factor, xout=dat_eval_ca$conc, rule=2,ties="ordered")[[2]])
+    ia_y_eval <- approx(x=ia_curve$conc, y=ia_curve$resp, xout=dat_eval_ia$conc, rule=2)[[2]]
+    sing_eval <- toxcast_model(dat=sing_info,params=sing_info,XX=dat_eval_single$conc)/norm_factor
+    fit_quality$rss_ratio_ca[jj] <- sum((dat_eval_ca$resp/norm_factor - ca_y_eval)^2)/sum((dat_eval_ca$resp/norm_factor - toxcast_model(dat=mix_info,params=mix_info,XX=dat_eval_ca$conc)/norm_factor)^2)
+    fit_quality$rss_ratio_ia[jj] <- sum((dat_eval_ia$resp/norm_factor - ia_y_eval)^2)/sum((dat_eval_ia$resp/norm_factor - toxcast_model(dat=mix_info,params=mix_info,XX=dat_eval_ia$conc)/norm_factor)^2)
+    fit_quality$rss_ratio_sing[jj] <- sum((dat_eval_single$resp/norm_factor - sing_eval)^2)/sum((dat_eval_single$resp/norm_factor - toxcast_model(dat=mix_info,params=mix_info,XX=dat_eval_single$conc)/norm_factor)^2)
+    
+    # Bootstrap 95% Confidence Interval Overlap
+    # CA overlap
+    ca_eval_concs <- unique(subset(dat_eval, conc<=(min(max(mix.results.all$ca_bootint[[jj]]$X2.5., na.rm=TRUE),
+                                             max(mix.results.all$ca_bootint[[jj]]$X97.5., na.rm=TRUE))+tol))$conc)
+    ca_overlap <- interval_overlap(curve_samples=mix.results.all$ca_bootint[[jj]],
+                                   mix_curves=mix.results.all$mix_bootint[[jj]],
+                                   eval_concs=ca_eval_concs,norm_factor=norm_factor,
+                                   model_type='ca')
+    fit_quality$ca_boot_overlap[jj]<- sum(ca_overlap)/length(ca_eval_concs)
+    # IA overlap
+    ia_eval_concs <- unique(dat_eval_ia$conc)
+    ia_overlap <- interval_overlap(curve_samples=mix.results.all$ia_bootint[[jj]],
+                                   mix_curves=mix.results.all$mix_bootint[[jj]],
+                                   eval_concs=ia_eval_concs,norm_factor=norm_factor,
+                                   model_type='ia')
+    fit_quality$ia_boot_overlap[jj]<- sum(ia_overlap)/length(ia_eval_concs)
+    # Potent single overlap
+    sing_eval_concs <- unique(dat_eval_single$conc)
+    sing_overlap <- interval_overlap(curve_samples=mix.results.all$single_bootint[[jj]],
+                                   mix_curves=mix.results.all$mix_bootint[[jj]],
+                                   eval_concs=sing_eval_concs,norm_factor=norm_factor,
+                                   model_type='single')
+    fit_quality$single_boot_overlap[jj]<- sum(sing_overlap)/length(sing_eval_concs)    
+    
+    # Bayesian 95% Credible Interval Overlap
+    # CA overlap
+    ca_eval_concs <- unique(subset(dat_eval, conc<=(min(max(mix.results.all$ca_bayesint[[jj]]$X2.5., na.rm=TRUE),
+                                             max(mix.results.all$ca_bayesint[[jj]]$X97.5., na.rm=TRUE))+tol))$conc)
+    ca_overlap_bayes <- interval_overlap(curve_samples=mix.results.all$ca_bayesint[[jj]],
+                                         mix_curves=mix.results.all$mix_bayesint[[jj]],
+                                         eval_concs=ca_eval_concs,norm_factor=norm_factor,
+                                         model_type='ca')
+    fit_quality$ca_bayes_overlap[jj]<- sum(ca_overlap_bayes)/length(ca_eval_concs)
+    # IA overlap
+    ia_eval_concs <- unique(dat_eval_ia$conc)
+    ia_overlap_bayes <- interval_overlap(curve_samples=mix.results.all$ia_bayesint[[jj]],
+                                         mix_curves=mix.results.all$mix_bayesint[[jj]],
+                                         eval_concs=ia_eval_concs,norm_factor=norm_factor,
+                                         model_type='ia')
+    fit_quality$ia_bayes_overlap[jj]<- sum(ia_overlap_bayes)/length(ia_eval_concs)
+    # Potent single overlap
+    sing_eval_concs <- unique(dat_eval_single$conc)
+    sing_overlap_bayes <- interval_overlap(curve_samples=mix.results.all$single_bayesint[[jj]],
+                                           mix_curves=mix.results.all$mix_bayesint[[jj]],
+                                           eval_concs=sing_eval_concs,norm_factor=norm_factor,
+                                           model_type='single')
+    fit_quality$single_bayes_overlap[jj]<- sum(sing_overlap_bayes)/length(sing_eval_concs)  
+    
+    # 95% Prediction Interval Coverage
+    if (nrow(dat_eval)<1){
+      fit_quality$ia_coverage[jj] <- NA
+      fit_quality$ca_coverage[jj] <- NA
+      fit_quality$single_coverage[jj] <- NA
+    } else {
+      # IA coverage, evaluated for each observed mixture concentration-response data point
+      ia_low <- approx(x=mix.results.all$ia_predint[[jj]]$conc, 
+                         y=mix.results.all$ia_predint[[jj]]$X2.5., 
+                         xout=dat_eval$conc, rule=2)[[2]] 
+      ia_hi <-  approx(x=mix.results.all$ia_predint[[jj]]$conc, 
+                         y=mix.results.all$ia_predint[[jj]]$X97.5., 
+                         xout=dat_eval$conc, rule=2)[[2]]
+      pt_coverage <- ifelse(dat_eval$resp/norm_factor>=ia_low & dat_eval$resp/norm_factor<=ia_hi,1,0)
+      fit_quality$ia_coverage[jj]<- sum(pt_coverage)/nrow(dat_eval)
+      # CA coverage, evaluated for each observed mixture concentration-response data point that CA is evaluated for
+      ca_eval <- mix.results.all$ca_predint[[jj]]
+      ca_coverage <- ifelse((ca_eval$conc >= ca_eval$capred_lo) & (ca_eval$conc <= ca_eval$capred_hi),1,0)
+      # fit_quality$ca_coverage[jj] <- sum(ca_coverage)/nrow(dat_eval)
+      fit_quality$ca_coverage[jj] <- sum(ca_coverage)/nrow(ca_eval)
+      # Single component coverage
+      params_sample <- subset(single.info,m4id==mix.results.all$potent_sing_id[jj])$bayesparams[[1]]
+      indices <- sample(1:10000, 1000, replace=F)
+      single_pred <- sapply(indices,single_curve_pred,curve_dat=sing_info,params_sample=params_sample,XX=dat_eval$conc)
+      single_pred_int <- apply(single_pred, 1, quantile, prob=c(0.025,0.975), na.rm=TRUE)
+      single_coverage <- ifelse(dat_eval$resp>=single_pred_int[1,] & dat_eval$resp<=single_pred_int[2,],1,0)
+      fit_quality$single_coverage[jj]<- sum(single_coverage)/nrow(dat_eval)
+    }
+  } else {
+    fit_quality$rss_ratio_ca[jj] <- NA
+    fit_quality$rss_ratio_ia[jj] <- NA
+    fit_quality$rss_ratio_sing[jj] <- NA  
+    fit_quality$ia_coverage[jj] <- NA
+    fit_quality$ca_coverage[jj] <- NA
+    fit_quality$single_coverage[jj] <- NA
+  }
+  # Repeat for ToxCast chemical library
+  if (mix.results.all$m4id_mix[jj] %in% mix.info.tc$m4id_mix){
+    norm_factor <- mix.info.tc[mix.info.tc$m4id_mix==mix.results.all$m4id_mix[jj],]$edpt_top
+    sing_info.tc <- mc5_attg_endpts[m4id==mix.results.all$potent_sing_id.tc[jj],]
+    
+    # Residual Sum of Squares ratios
+    ca_curve.tc <- mix.results.all$ca_curve.tc[[jj]]
+    ia_curve.tc <- mix.results.all$ia_curve.tc[[jj]]
+    single_curve.tc <- mix.results.all$potent_single.tc[[jj]]
+    # select only concentrations where the models are valid
+    dat_eval_ca.tc <- subset(dat_eval,conc<=(max(ca_curve.tc$conc,na.rm=T)+tol))
+    dat_eval_ia.tc <- subset(dat_eval,conc<=(max(ia_curve.tc$conc,na.rm=T)+tol))
+    dat_eval_single.tc <- subset(dat_eval,conc<=(max(single_curve.tc$conc,na.rm=T)+tol))
+    # evaluate models at observed concentrations
+    ca_y_eval.tc <- ifelse(dat_eval_ca.tc$conc<min(ca_curve.tc$conc,na.rm=TRUE),0,approx(x=ca_curve.tc$conc, y=ca_curve.tc$resp/norm_factor, xout=dat_eval_ca.tc$conc, rule=2,ties="ordered")[[2]])
+    ia_y_eval.tc <- approx(x=ia_curve.tc$conc, y=ia_curve.tc$resp, xout=dat_eval_ia.tc$conc, rule=2)[[2]]
+    sing_eval.tc <- toxcast_model(dat=sing_info.tc,params=sing_info.tc,XX=dat_eval_single.tc$conc)/norm_factor
+    fit_quality$rss_ratio_ca.tc[jj] <- sum((dat_eval_ca.tc$resp/norm_factor - ca_y_eval.tc)^2)/sum((dat_eval_ca.tc$resp/norm_factor - toxcast_model(dat=mix_info,params=mix_info,XX=dat_eval_ca.tc$conc)/norm_factor)^2)
+    fit_quality$rss_ratio_ia.tc[jj] <- sum((dat_eval_ia.tc$resp/norm_factor - ia_y_eval.tc)^2)/sum((dat_eval_ia.tc$resp/norm_factor - toxcast_model(dat=mix_info,params=mix_info,XX=dat_eval_ia.tc$conc)/norm_factor)^2)
+    fit_quality$rss_ratio_sing.tc[jj] <- sum((dat_eval_single.tc$resp/norm_factor - sing_eval.tc)^2)/sum((dat_eval_single.tc$resp/norm_factor - toxcast_model(dat=mix_info,params=mix_info,XX=dat_eval_single.tc$conc)/norm_factor)^2) 
+    
+    # Bootstrap 95% Confidence Interval Overlap
+    # CA overlap
+    ca_eval_concs <- unique(subset(dat_eval, conc<=(min(max(mix.results.all$ca_bootint.tc[[jj]]$X2.5., na.rm=TRUE),
+                                             max(mix.results.all$ca_bootint.tc[[jj]]$X97.5., na.rm=TRUE))+tol))$conc)
+    ca_overlap.tc <- interval_overlap(curve_samples=mix.results.all$ca_bootint.tc[[jj]],
+                                      mix_curves=mix.results.all$mix_bootint[[jj]],
+                                      eval_concs=ca_eval_concs,norm_factor=norm_factor,
+                                      model_type='ca')
+    fit_quality$ca_boot_overlap.tc[jj]<- sum(ca_overlap.tc)/length(ca_eval_concs)
+    # IA overlap
+    ia_eval_concs <- unique(dat_eval_ia$conc)
+    ia_overlap.tc <- interval_overlap(curve_samples=mix.results.all$ia_bootint.tc[[jj]],
+                                      mix_curves=mix.results.all$mix_bootint[[jj]],
+                                      eval_concs=ia_eval_concs,norm_factor=norm_factor,
+                                      model_type='ia')
+    fit_quality$ia_boot_overlap.tc[jj]<- sum(ia_overlap.tc)/length(ia_eval_concs)
+    # Potent single overlap
+    sing_eval_concs <- unique(dat_eval_single$conc)
+    sing_overlap.tc <- interval_overlap(curve_samples=mix.results.all$single_bootint.tc[[jj]],
+                                        mix_curves=mix.results.all$mix_bootint[[jj]],
+                                        eval_concs=sing_eval_concs,norm_factor=norm_factor,
+                                        model_type='single')
+    fit_quality$single_boot_overlap.tc[jj]<- sum(sing_overlap.tc)/length(sing_eval_concs)    
+    
+    # Bayesian 95% Credible Interval Overlap
+    # CA overlap
+    ca_eval_concs <- unique(subset(dat_eval, conc<=(min(max(mix.results.all$ca_bayesint.tc[[jj]]$X2.5., na.rm=TRUE),
+                                             max(mix.results.all$ca_bayesint.tc[[jj]]$X97.5., na.rm=TRUE))+tol))$conc)
+    ca_overlap_bayes.tc <- interval_overlap(curve_samples=mix.results.all$ca_bayesint.tc[[jj]],
+                                            mix_curves=mix.results.all$mix_bayesint[[jj]],
+                                            eval_concs=ca_eval_concs,norm_factor=norm_factor,
+                                            model_type='ca')
+    fit_quality$ca_bayes_overlap.tc[jj]<- sum(ca_overlap_bayes.tc)/length(ca_eval_concs)
+    # IA overlap
+    ia_eval_concs <- unique(dat_eval_ia$conc)
+    ia_overlap_bayes.tc <- interval_overlap(curve_samples=mix.results.all$ia_bayesint.tc[[jj]],
+                                            mix_curves=mix.results.all$mix_bayesint[[jj]],
+                                            eval_concs=ia_eval_concs,norm_factor=norm_factor,
+                                            model_type='ia')
+    fit_quality$ia_bayes_overlap.tc[jj]<- sum(ia_overlap_bayes.tc)/length(ia_eval_concs)
+    # Potent single overlap
+    sing_eval_concs <- unique(dat_eval_single$conc)
+    sing_overlap_bayes.tc <- interval_overlap(curve_samples=mix.results.all$single_bayesint.tc[[jj]],
+                                              mix_curves=mix.results.all$mix_bayesint[[jj]],
+                                              eval_concs=sing_eval_concs,norm_factor=norm_factor,
+                                              model_type='single')
+    fit_quality$single_bayes_overlap.tc[jj]<- sum(sing_overlap_bayes.tc)/length(sing_eval_concs)  
+    
+    # 95% prediction interval coverage
+    if (nrow(dat_eval)<1){
+      fit_quality$ia_coverage.tc[jj] <- NA
+      fit_quality$ca_coverage.tc[jj] <- NA
+      fit_quality$single_coverage.tc[jj] <- NA
+    } else {
+      # IA coverage, evaluated for each observed mixture concentration-response data point
+      ia_low.tc <- approx(x=mix.results.all$ia_predint.tc[[jj]]$conc, 
+                         y=mix.results.all$ia_predint.tc[[jj]]$X2.5., 
+                         xout=dat_eval$conc, rule=2)[[2]] 
+      ia_hi.tc <-  approx(x=mix.results.all$ia_predint.tc[[jj]]$conc, 
+                         y=mix.results.all$ia_predint.tc[[jj]]$X97.5., 
+                         xout=dat_eval$conc, rule=2)[[2]]
+      pt_coverage.tc <- ifelse(dat_eval$resp/norm_factor>=ia_low.tc & dat_eval$resp/norm_factor<=ia_hi.tc,1,0)
+      fit_quality$ia_coverage.tc[jj]<- sum(pt_coverage.tc)/nrow(dat_eval)
+      # CA coverage, evaluated for each observed mixture concentration-response data point that CA is evaluated for
+      ca_eval.tc <- mix.results.all$ca_predint.tc[[jj]]
+      ca_coverage.tc <- ifelse((ca_eval.tc$conc >= ca_eval.tc$capred_lo) & (ca_eval.tc$conc <= ca_eval.tc$capred_hi),1,0)
+      # fit_quality$ca_coverage.tc[jj] <- sum(ca_coverage.tc)/nrow(dat_eval)
+      fit_quality$ca_coverage.tc[jj] <- sum(ca_coverage.tc)/nrow(ca_eval.tc)
+      # Single component coverage
+      params_sample.tc <- subset(single.info.tc,m4id==mix.results.all$potent_sing_id.tc[jj])$bayesparams[[1]]
+      indices <- sample(1:10000, 1000, replace=F)
+      single_pred.tc <- sapply(indices,single_curve_pred,curve_dat=sing_info.tc,params_sample=params_sample.tc,XX=dat_eval$conc)
+      single_pred_int.tc <- apply(single_pred.tc, 1, quantile, prob=c(0.025,0.975), na.rm=TRUE)
+      single_coverage.tc <- ifelse(dat_eval$resp>=single_pred_int.tc[1,] & dat_eval$resp<=single_pred_int.tc[2,],1,0)
+      fit_quality$single_coverage.tc[jj]<- sum(single_coverage.tc)/nrow(dat_eval)
+    }
+  } else{
+    fit_quality$rss_ratio_ca.tc[jj] <- NA
+    fit_quality$rss_ratio_ia.tc[jj] <- NA
+    fit_quality$rss_ratio_sing.tc[jj] <- NA    
+    fit_quality$ia_coverage.tc[jj] <- NA
+    fit_quality$ca_coverage.tc[jj] <- NA
+    fit_quality$single_coverage.tc[jj] <- NA
+  }
+
+}
+
+
+
+full_curve_table <- data.frame(ca=c(100*rss_fit_metric(fit_quality$rss_ratio_ca),
+                                    100*interval_fit_metric(fit_quality$ca_boot_overlap),
+                                    100*interval_fit_metric(fit_quality$ca_bayes_overlap),
+                                    100*pred_fit_metric(fit_quality$ca_coverage)),
+                               ia=c(100*rss_fit_metric(fit_quality$rss_ratio_ia),
+                                    100*interval_fit_metric(fit_quality$ia_boot_overlap),
+                                    100*interval_fit_metric(fit_quality$ia_bayes_overlap),
+                                    100*pred_fit_metric(fit_quality$ia_coverage)),
+                               sing=c(100*rss_fit_metric(fit_quality$rss_ratio_sing),
+                                      100*interval_fit_metric(fit_quality$single_boot_overlap),
+                                      100*interval_fit_metric(fit_quality$single_bayes_overlap),
+                                      100*pred_fit_metric(fit_quality$single_coverage)),
+                               ca.tc=c(100*rss_fit_metric(fit_quality$rss_ratio_ca.tc),
+                                       100*interval_fit_metric(fit_quality$ca_boot_overlap.tc),
+                                       100*interval_fit_metric(fit_quality$ca_bayes_overlap.tc),
+                                       100*pred_fit_metric(fit_quality$ca_coverage.tc)),
+                               ia.tc=c(100*rss_fit_metric(fit_quality$rss_ratio_ia.tc),
+                                       100*interval_fit_metric(fit_quality$ia_boot_overlap.tc),
+                                       100*interval_fit_metric(fit_quality$ia_bayes_overlap.tc),
+                                       100*pred_fit_metric(fit_quality$ia_coverage.tc)),
+                               sing.tc=c(100*rss_fit_metric(fit_quality$rss_ratio_sing.tc),
+                                         100*interval_fit_metric(fit_quality$single_boot_overlap.tc),
+                                         100*interval_fit_metric(fit_quality$single_bayes_overlap.tc),
+                                         100*pred_fit_metric(fit_quality$single_coverage.tc)))
+
+
+```
+
