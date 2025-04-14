@@ -53,7 +53,6 @@ curve_bootstrap <- function(jj, curve.info, boot_num=1000, type="single",tc=FALS
     datchemsample <- data.table(tempmat)
     # Fit each bootstrap sample using tcplFit
     fname <- paste0("fit", curve.info$modl[jj]) # requires each model function have name "fit____" where ____ is the model name
-    # use do.call to call fit function; cnst has different inputs than others.
     if(fname != "fitpoly2"){
       temp2 <- sapply(datchemsample,
                       match.fun(fname),
@@ -124,7 +123,7 @@ bayes_curve <- function(ii, curve.info, n_iter=10000, n_burn=2000, type="single"
       }
       # medians
       rmds <- tapply(comp_dat$resp, comp_dat$conc, median)
-      # For each curve type: (1) define bayesian likelihood model and (2) define prior as uniform with same bounds as ToxCast
+      # For each curve type: (1) define bayesian likelihood model and (2) define prior as uniform with same bounds as tcplfit2
       if (single_dat$modl=="poly1"){
         # define the model
         a0 <- max(abs(rmds))/max(comp_dat$conc)
@@ -193,7 +192,7 @@ bayes_curve <- function(ii, curve.info, n_iter=10000, n_burn=2000, type="single"
         ga_upp <- max(comp_dat$conc)*(10^0.5)
         # p bounds set in TOxCast of 0.3 - 8
         # for hill, concentrations are internally converted to log in ToxCast
-        # try keeping it not in log scale because I am lazy
+        # here, they are kept as is
         data <- list(conc=comp_dat$conc, resp=comp_dat$resp, n=nrow(comp_dat),
                      tp_val=tp_val,ga_low=ga_low, ga_upp=ga_upp)
         model_string <- textConnection("model{
@@ -224,7 +223,7 @@ bayes_curve <- function(ii, curve.info, n_iter=10000, n_burn=2000, type="single"
         la_upp <- max(comp_dat$conc)*(50) # change from ToxCast bounds
         # p and q bounds set in TOxCast of 0.3 - 8
         # for gnls, concentrations are internally converted to log in ToxCast
-        # try keeping it not in log scale because I am lazy
+        # here, keep concentrations as is
         data <- list(conc=comp_dat$conc, resp=comp_dat$resp, n=nrow(comp_dat),
                      tp_val=tp_val,ga_low=ga_low, ga_upp=ga_upp, la_low=la_low, la_upp=la_upp)
         model_string <- textConnection("model{
