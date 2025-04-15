@@ -460,6 +460,7 @@ Combine single chemical and mixture information to compare bioactivity:exposure 
 
 pfas_combos[c(12:15),] <- NA
 pfas_combos$X1[c(12:15)] <- pfas_single$dtsxid
+pfas_combos$popacc[c(12:15)] <- pfas_single$popacc
 pfas_combos$popmed[c(12:15)] <- pfas_single$popmed
 pfas_combos$femmed[c(12:15)] <- pfas_single$femmed
 pfas_combos$malemed[c(12:15)] <- pfas_single$malemed
@@ -563,8 +564,7 @@ p1 <- ggplot(pfas_demo_plot, aes(x=demographic,y=factor(chem_name,unique(chem_na
                             "LowIncome"="Family Income:Poverty < 5","HighIncome"=expression("Family Income:Poverty">=5)))
 
 # plot of median ACC values 
-pfas_combos$popacc[c(12:15)] <- pfas_single$popacc
-p2 <- ggplot(pfas_combos, aes(x=popacc,y=factor(chem_name,unique(chem_name))))+
+p2 <- ggplot(pfas_combos[moe_order,], aes(x=popacc,y=factor(chem_name,unique(chem_name))))+
   geom_point(size=3)+
   scale_x_log10(limits=c(10,60),labels = label_number(drop0trailing = TRUE))+
   theme_bw(base_size=20)+
