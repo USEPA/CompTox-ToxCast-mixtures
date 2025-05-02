@@ -386,11 +386,10 @@ for (ii in 1:11){
 ## Plot population BER
 Represent distributions as boxplots and plot for each single chemical and mixture
 ```{r}
-pfas_combos[c(12:15),] <- NA
-pfas_combos$X1[c(12:15)] <- pfas_single$dtsxid
-pfas_combos$popmed[c(12:15)] <- pfas_single$popmed
-pfas_combos$results[c(12:15)] <- pfas_single$exposure
-pfas_combos$mix_num[c(12:15)] <- c(12:15)
+# combine single and mixture information
+pfas_single <- pfas_single %>% rename_at('dtsxid', ~'X1')
+pfas_single <- pfas_single %>% rename_at('exposure',~'results')
+pfas_combos <- dplyr::bind_rows(pfas_combos,pfas_single)
 
 # names
 for (jj in 1:nrow(pfas_combos)){
@@ -413,7 +412,6 @@ for (jj in 1:nrow(pfas_combos)){
   }
   pfas_combos$chem_name[jj] <- chem_name
 }
-
 # order from largest to smallest MOE median
 plot_order <- order(pfas_combos$popmed, decreasing=TRUE)
 # colors
@@ -458,44 +456,6 @@ dev.off()
 Combine single chemical and mixture information to compare bioactivity:exposure ratio medians across demographic groups to the median population
 ```{r}
 
-pfas_combos[c(12:15),] <- NA
-pfas_combos$X1[c(12:15)] <- pfas_single$dtsxid
-pfas_combos$popmed[c(12:15)] <- pfas_single$popmed
-pfas_combos$femmed[c(12:15)] <- pfas_single$femmed
-pfas_combos$malemed[c(12:15)] <- pfas_single$malemed
-pfas_combos$youngmed[c(12:15)] <- pfas_single$youngmed
-pfas_combos$oldmed[c(12:15)] <- pfas_single$oldmed
-pfas_combos$mexamer[c(12:15)] <- pfas_single$mexamer
-pfas_combos$hispanic[c(12:15)] <- pfas_single$hispanic
-pfas_combos$white[c(12:15)] <- pfas_single$white
-pfas_combos$black[c(12:15)] <- pfas_single$black
-pfas_combos$otherrace[c(12:15)] <- pfas_single$otherrace
-pfas_combos$lowinc[c(12:15)] <- pfas_single$lowinc
-pfas_combos$highinc[c(12:15)] <- pfas_single$highinc
-pfas_combos$mix_num[c(12:15)] <- c(1:4)
-
-# names
-for (jj in 1:nrow(pfas_combos)){
-  name1 <- pfas_chems[pfas_chems$DSSTox_Substance_Id==pfas_combos$X1[jj],]$Substance_Name
-  if (is.na(pfas_combos$X2[jj])){
-    chem_name <- name1
-  } else {
-    name2 <- pfas_chems[pfas_chems$DSSTox_Substance_Id==pfas_combos$X2[jj],]$Substance_Name
-    if (is.na(pfas_combos$X3[jj])){
-      chem_name <- paste(name1, "+", name2)
-    } else {
-      name3 <- pfas_chems[pfas_chems$DSSTox_Substance_Id==pfas_combos$X3[jj],]$Substance_Name
-      if (is.na(pfas_combos$X4[jj])){
-        chem_name <- paste(name1, "+", name2, "+", name3)
-      } else {
-        name4 <- pfas_chems[pfas_chems$DSSTox_Substance_Id==pfas_combos$X4[jj],]$Substance_Name
-        chem_name <- paste(name1, "+", name2, "+", name3, "+", name4)
-      }
-    }
-  }
-  pfas_combos$chem_name[jj] <- chem_name
-}
-
 pfas_heatmap <- data.frame(chem_name=pfas_combos$chem_name,
                            pop_med=pfas_combos$popmed,
                            Female=pfas_combos$femmed/pfas_combos$popmed,
@@ -522,9 +482,9 @@ heatmap_add <- data.frame(chem_name=pfas_combos$chem_name,
                           other_ber=pfas_combos$otherrace,
                           lowinc_ber=pfas_combos$lowinc,
                           highinc_ber=pfas_combos$highinc)
-moe_order <- order(pfas_heatmap$pop_med, decreasing=TRUE)
-pfas_heatmap <- pfas_heatmap[moe_order,]
-heatmap_add <- heatmap_add[moe_order,]
+ber_order <- order(pfas_heatmap$pop_med, decreasing=TRUE)
+pfas_heatmap <- pfas_heatmap[ber_order,]
+heatmap_add <- heatmap_add[ber_order,]
 
 
 pfas_info_plot1 <- melt(pfas_heatmap,
@@ -539,7 +499,9 @@ pfas_demo_plot <- data.frame(pfas_info_plot1,ber=pfas_info_plot2$ber)
 # Bubble plot to compare median BER values of survey demographic groups and median population BER
 p1 <- ggplot(pfas_demo_plot, aes(x=demographic,y=factor(chem_name,unique(chem_name)),size=ber,fill=value))+
   geom_point(shape=21)+
-  scale_size(range=c(3,12),name="Median BER: ",breaks=c(6E2,1E3,5E3,19.5E3))+
+  scale_size(range=c(3,12),name="Median BER: ",breaks=c(6E2,1E3,5E3,19.5E3))+ #132
+  # scale_size(range=c(3,12),name="Median BER: ",breaks=c(7.5E2,1E3,5E3,17.5E3))+ #134
+  # scale_size(range=c(3,12),name="Median BER: ",breaks=c(1.85E3,5E3,10E3,30.5E3))+ #102
   scale_fill_gradientn(colours = c("red","white","midnightblue"),
                        values=rescale(c(min(pfas_demo_plot$value),1,max(pfas_demo_plot$value))),
                        limits=c(0.8,1.6),
@@ -554,7 +516,10 @@ p1 <- ggplot(pfas_demo_plot, aes(x=demographic,y=factor(chem_name,unique(chem_na
         legend.position="bottom",
         legend.box = "vertical",
         legend.margin=margin(t=0,b=0),
-        legend.key.width=unit(1.5,"cm"))+
+        legend.key.width=unit(1.5,"cm"),
+        plot.margin=margin(t=30,r=20,b=0,l=20))+
+  guides(size = guide_legend(order = 1),
+         colorbar = guide_legend(order = 2))+
   scale_x_discrete(labels=c("Female"="Female","Male"="Male",
                             "Young"="Age < 20 Years", "Old"= expression("Age">="20 Years"),
                             "Mexican"="Mexican American","Hispanic"="Other Hispanic",
@@ -564,7 +529,7 @@ p1 <- ggplot(pfas_demo_plot, aes(x=demographic,y=factor(chem_name,unique(chem_na
 
 # plot of median ACC values 
 pfas_combos$popacc[c(12:15)] <- pfas_single$popacc
-p2 <- ggplot(pfas_combos, aes(x=popacc,y=factor(chem_name,unique(chem_name))))+
+p2 <- ggplot(pfas_combos[ber_order,], aes(x=popacc,y=factor(chem_name,unique(chem_name))))+
   geom_point(size=3)+
   scale_x_log10(limits=c(10,60),labels = label_number(drop0trailing = TRUE))+
   theme_bw(base_size=20)+
@@ -581,3 +546,107 @@ tiff("ber_bubbleplot_aeid132.tiff", units="in", width=12, height=10, res=800)
 plot_grid(p1,p2,align="h",ncol=2, rel_widths=c(4/5,1/5))
 dev.off()
 ```
+## Figure S1
+Supplemental plot for ATG_PPRE_CIS and ATG_PPARg_TRANS
+```{r}
+# tiff("ber_bubbleplot_aeid102_134.tiff", units="in", width=20, height=10, res=800)
+# plot_grid(p1,p2,labels='AUTO',label_size=28) #c('A','B'),label_size=32
+# dev.off()
+```
+
+## Figure S2
+Supplemental plot of trends in exposure across demographics
+```{r}
+
+pfas_heatmap <- data.frame(chem_name=pfas_combos$chem_name,
+                           pop_med=pfas_combos$popexp,
+                           Female=pfas_combos$femexp/pfas_combos$popexp,
+                           Male=pfas_combos$maleexp/pfas_combos$popexp,
+                           Young=pfas_combos$youngexp/pfas_combos$popexp,
+                           Old=pfas_combos$oldexp/pfas_combos$popexp,
+                           Mexican=pfas_combos$mexexp/pfas_combos$popexp,
+                           Hispanic=pfas_combos$hispexp/pfas_combos$popexp,
+                           White=pfas_combos$whiteexp/pfas_combos$popexp,
+                           Black=pfas_combos$blackexp/pfas_combos$popexp,
+                           Other_Race=pfas_combos$otherraceexp/pfas_combos$popexp,
+                           LowIncome=pfas_combos$lowexp/pfas_combos$popexp,
+                           HighIncome=pfas_combos$highexp/pfas_combos$popexp)
+heatmap_add <- data.frame(chem_name=pfas_combos$chem_name,
+                          pop_exp = pfas_combos$popexp,
+                          female_exp=pfas_combos$femexp,
+                          male_exp=pfas_combos$maleexp,
+                          young_exp=pfas_combos$youngexp,
+                          old_exp=pfas_combos$oldexp,
+                          mex_exp=pfas_combos$mexexp,
+                          hisp_exp=pfas_combos$hispexp,
+                          white_exp=pfas_combos$whiteexp,
+                          black_exp=pfas_combos$blackexp,
+                          other_exp=pfas_combos$otherraceexp,
+                          lowinc_exp=pfas_combos$lowexp,
+                          highinc_exp=pfas_combos$highexp)
+ber_order <- order(pfas_combos$popmed, decreasing=TRUE)
+pfas_heatmap <- pfas_heatmap[ber_order,]
+heatmap_add <- heatmap_add[ber_order,]
+
+
+pfas_info_plot1 <- melt(pfas_heatmap,
+                        measure.vars=c("Female","Male","Young","Old","Mexican","Hispanic","White","Black","Other_Race","LowIncome","HighIncome"),
+                        variable.name="demographic")
+pfas_info_plot2 <- melt(heatmap_add,
+                        measure.vars=c("female_exp","male_exp","young_exp","old_exp",
+                                       "mex_exp","hisp_exp","white_exp","black_exp","other_exp","lowinc_exp","highinc_exp"),
+                        value.name="exp")
+pfas_demo_plot <- data.frame(pfas_info_plot1,exposure=pfas_info_plot2$exp)
+
+# Bubble plot to compare median BER values of survey demographic groups and median population BER
+p1 <- ggplot(pfas_demo_plot, aes(x=demographic,y=factor(chem_name,unique(chem_name)),size=exposure,fill=value))+
+  geom_point(shape=21)+
+  scale_size(range=c(3,12),name="Median Exposure: ",breaks=c(2.5E-3,1E-2,4.2E-2),labels = label_scientific())+ #132
+  # scale_size(range=c(3,12),name="Median BER: ",breaks=c(7.5E2,1E3,5E3,17.5E3))+ #134
+  # scale_size(range=c(3,12),name="Median BER: ",breaks=c(1.85E3,5E3,10E3,30.5E3))+ #102
+  scale_fill_gradientn(colours = c("midnightblue","white","red"),
+                       values=rescale(c(min(pfas_demo_plot$value),1,max(pfas_demo_plot$value))),
+                       limits=c(0.6,1.3),
+                       oob=scales::squish,
+                       name= TeX(r'($\frac{Group\, Median\, Exposure}{Population\, Median\, Exposure}: \; \;$)'))+
+  theme_bw(base_size=20)+
+  theme(axis.text.x = element_text(angle=50,hjust=1,vjust=1.0,size=14, color="black"),
+        axis.text.y = element_text(size = 14,color="black"),
+        axis.title = element_blank(),
+        legend.text = element_text(size=14),
+        legend.title=element_text(size=16),
+        legend.position="bottom",
+        legend.box = "vertical",
+        legend.margin=margin(t=0,b=0),
+        legend.spacing.x=unit(0,"cm"),
+        legend.key.width=unit(1,"cm"),
+        plot.margin=margin(t=30,r=10,b=0,l=20))+
+  guides(size = guide_legend(order = 1),
+         colorbar = guide_legend(order = 2))+
+  scale_x_discrete(labels=c("Female"="Female","Male"="Male",
+                            "Young"="Age < 20 Years", "Old"= expression("Age">="20 Years"),
+                            "Mexican"="Mexican American","Hispanic"="Other Hispanic",
+                            "White"="Non-Hispanic White","Black"="Non-Hispanic Black",
+                            "Other_Race"="Other Race",
+                            "LowIncome"="Family Income:Poverty < 5","HighIncome"=expression("Family Income:Poverty">=5)))
+
+# plot of median ACC values 
+
+p2 <- ggplot(pfas_combos[ber_order,], aes(x=popexp,y=factor(chem_name,unique(chem_name))))+
+  geom_point(size=3)+
+  scale_x_log10(labels = label_number(drop0trailing = TRUE))+ #limits=c(10,60),
+  theme_bw(base_size=20)+
+  xlab(expression(paste("Median Pop. Exposure [",mu, "M]")))+ 
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.title.y = element_blank(),
+        axis.title.x = element_text(size=14,margin = margin(t=-100)),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank())
+
+  
+tiff("exposure_bubbleplot_aeid132.tiff", units="in", width=12, height=10, res=800)
+plot_grid(p1,p2,align="h",ncol=2, rel_widths=c(7/9,2/9))
+dev.off()
+```
+
