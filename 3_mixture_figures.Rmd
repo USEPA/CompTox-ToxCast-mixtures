@@ -1,0 +1,591 @@
+---
+title: "mixture_figures"
+author: "Rachel Broughton"
+date: "2025-04-10"
+output: html_document
+---
+
+## Setup Environment
+```{r setup, include=FALSE}
+rm(list = ls())
+
+# load pacakges
+library(tidyverse)
+library(data.table)
+library(readxl)
+library(tcplfit2)
+library(tcpl)
+library(gridExtra)
+library(ggplot2)
+library(scales)
+library(grid)
+library(cowplot)
+
+# set up connections to ToxCast database
+tcplConf("_dataminer", pass="pass", db="prod_internal_invitrodb_v4_2", drvr="MySQL", host="ccte-mysql-res.dmap-prod.aws.epa.gov")
+tcplConfList()
+
+# import scripts with functions
+source("./scripts/curve_fitting_functions.R")
+source("./scripts/mixture_model_functions.R")
+source("./scripts/mixture_plotting_functions.R")
+
+```
+
+## Load data from test dataset
+```{r}
+#Pull mixtures data based on spids of experiment "EPA-68HE0B21P0625"
+# have spid values for mixture experiment pre-saved
+load("./input/mixture_spids.Rdata")
+
+# Load test dataset from this experiment
+mc3 <- tcplPrepOtpt(tcplLoadData(lvl=3, type='mc', fld='spid', val=spids))
+mc4 <- tcplPrepOtpt(tcplLoadData(lvl=4,type='mc', fld='spid', val=spids))
+mc5 <- tcplPrepOtpt(tcplLoadData(lvl=5,type='mc', fld='spid', val=spids))
+mc4_agg <- tcplPrepOtpt(tcplLoadData(lvl="agg",type='mc', fld='spid', val=spids))
+
+# Map mixtures to single chemical components
+# 11 single chemicals (plus unused Retinoic acid) over 81 endpoints (aeid=63-144)
+# 21 mixtures over 81 endpoints (aeid=63-144)
+ES219_key <- read_excel("./input/ATG_mixtures_upload.xlsx",  sheet = "ES219_key")
+mixtures_uploads <- read_excel("./input/ATG_mixtures_upload.xlsx",  sheet = "Mixtures_upload")
+mixtures_key <- merge(ES219_key, mixtures_uploads, by.x="BOTTLE_ID", by.y="Barcode_mixture")
+
+# separate single chemicals and mixtures by DTXSID
+mc5.single <- mc5 %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.y)
+mc5.mixture <- mc5 %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.x)
+
+# filter for active mixtures with hitc >= 0.9 and non-negative (curve goes from zero to positive max only for now)
+mc5.mixture.filter <- mc5.mixture %>% filter(hitc >= 0.9 & top>=0)
+
+# Load all mc5 level data for Attagene endpoints
+# for finding maximum endpoint 'top' response over all of Attagene by endpoint to use for normalization
+mc5_attg_endpts <- tcplPrepOtpt(tcplLoadData(lvl=5, type = 'mc', fld='aeid',val=c(63:144)))
+
+```
+
+## Select and load single component data from legacy ToxCast database
+Same component chemicals, but from legacy ToxCast (and same test mixtures)
+```{r}
+# load saved selected spids instead of running each time
+load("./input/mixture_spids_tc.Rdata")
+
+# Load other mc levels for the subset of toxcast nonmixture data
+mc3_tcsubset <- tcplPrepOtpt(tcplLoadData(lvl=3, type = 'mc', fld='spid',val=spids_tc))
+mc4_tcsubset <- tcplPrepOtpt(tcplLoadData(lvl=4, type = 'mc', fld='spid',val=spids_tc))
+mc4_agg_tcsubset <- tcplPrepOtpt(tcplLoadData(lvl="agg", type = 'mc', fld='spid',val=spids_tc))
+
+# select data from legacy ToxCast for plotting (even those not analyzed with models)
+tc_mc5_notmix <- mc5_attg_endpts %>% filter(!(spid %in% spids))
+setDT(tc_mc5_notmix)
+tc_mc5_notmix_filter <- tcplSubsetChid(tc_mc5_notmix)
+```
+
+## Load dataframes of stored results
+Mixtures information, single component information, and model results are calculated in the mixtures_analysis.Rmd file
+```{r}
+# load mix.info data frames with test dataset information
+load("./output/mix_info.Rdata")
+# load mix.info.tc data frames with legacy ToxCast data information
+load("./output/mix_info_tc.Rdata")
+# load single.info data frames with test dataset component information
+load("./output/single_info.Rdata")
+# load single.info.tc data frames with legacy ToxCast component information
+load("./output/single_info_tc.Rdata")
+# load mixture model results for ACC estimates
+load("./output/mix_results_acc.Rdata")
+#load mixture model results for full concentration-response curve predictions
+load("./output/mix_results_all.Rdata")
+# load fit quality metric results
+load("./output/fit_quality.Rdata")
+
+```
+
+# Figure 3: Example analysis plots
+```{r}
+# Use functions that are used to plot all analysis plots, but modify sizes, widths, and themes
+ex_index <- 154
+p1_og <- ggplot_build(plotdata.func(index=ex_index, tc_lib=TRUE) +
+                        guides(shape=guide_legend(override.aes=list(size=4)),color=guide_legend(override.aes=list(lwd=1.5))) + 
+                        theme_bw(base_size=28) + theme(legend.title=element_blank(),
+                                                            legend.text = element_text(size=20),
+                                                            legend.background = element_rect(fill=NA),
+                                                            legend.margin = margin(0.1,0.1,0.1,0.1, unit='cm'),
+                                                            legend.justification = c(0,1),
+                                                            legend.position = "inside",
+                                                            legend.position.inside=c(0.01,0.99),
+                                                            legend.key.width = unit(2, "cm"),
+                                                            legend.key.height = unit(1, "cm"),
+                                                            axis.text = element_text(color="black"),
+                                                            plot.margin = margin(t=1, r=1.5,b=0,l=1.5, unit = "cm"),
+                                                            plot.title = element_blank()))
+p1_og$data[[1]]$size <- 4
+p1_og$data[[2]]$size <- 4
+p1_og$data[[3]]$size <- 4
+p1_og$data[[4]]$linewidth <- 2
+p1_og$data[[5]]$linewidth <- 2
+p1_og$data[[6]]$linewidth <- 2
+p1_og$data[[7]]$linewidth <- 2
+p1 <- ggplot_gtable(p1_og)
+ 
+p2_og <- ggplot_build(plotlines.func(index=ex_index,tc=TRUE) +
+                      guides(color=guide_legend(override.aes=list(lwd=2,size=4))) + 
+                      theme_bw(base_size=28) + theme(legend.title=element_blank(),
+                                                     legend.text = element_text(size=20),
+                                                     legend.background = element_rect(fill=NA),
+                                                     legend.margin = margin(0.1,0.1,0.1,0.1, unit='cm'),
+                                                     legend.justification = c(0,1),
+                                                     legend.position = "inside",
+                                                     legend.position.inside=c(0.01,0.99),
+                                                     legend.key.width = unit(2, "cm"),
+                                                     legend.key.height = unit(1, "cm"),
+                                                     axis.text = element_text(color="black"),
+                                                     plot.margin = margin(t=1, r=1.5,b=0,l=1.5, unit = "cm"),
+                                                     plot.title = element_blank()))
+p2_og$data[[1]]$linewidth <- 2
+p2_og$data[[2]]$linewidth <- 2
+p2_og$data[[3]]$linewidth <- 2
+p2_og$data[[4]]$linewidth <- 2
+p2_og$data[[5]]$linewidth <- 2
+p2_og$data[[6]]$size <- 4
+p2 <- ggplot_gtable(p2_og)
+
+p3_og <- ggplot_build(plotint.func(index=ex_index,tc=TRUE) +
+                      guides(color=guide_legend(override.aes=list(lwd=2,size=4)),fill=guide_legend(override.aes=list(lwd=0.5))) + 
+                      theme_bw(base_size=28) + theme(legend.title=element_blank(),
+                                                     legend.text = element_text(size=20),
+                                                     legend.background = element_rect(fill=NA),
+                                                     legend.margin = margin(0.1,0.1,0.1,0.1, unit='cm'),
+                                                     legend.justification = c(0,1),
+                                                     legend.position = "inside",
+                                                     legend.position.inside=c(0.01,0.99),
+                                                     legend.key.width = unit(2, "cm"),
+                                                     legend.key.height = unit(1, "cm"),
+                                                     legend.spacing.y = unit(-0.3, "cm"),
+                                                     axis.text = element_text(color="black"),
+                                                     plot.margin = margin(t=1, r=1.5,b=0,l=1.5, unit = "cm"),
+                                                     plot.title = element_blank()))
+p3_og$data[[1]]$linewidth <- 0.5
+p3_og$data[[2]]$linewidth <- 0.5
+p3_og$data[[3]]$linewidth <- 0.5
+p3_og$data[[4]]$linewidth <- 0.5
+p3_og$data[[5]]$linewidth <- 2
+p3_og$data[[6]]$linewidth <- 2
+p3_og$data[[7]]$size <- 4
+p3 <- ggplot_gtable(p3_og)
+
+p4_og <- ggplot_build(plotbayesintia.func(index=ex_index,tc=TRUE) +
+                      guides(color=guide_legend(override.aes=list(lwd=2,size=4))) + 
+                      theme_bw(base_size=28) + theme(legend.title=element_blank(),
+                                                     legend.text = element_text(size=20),
+                                                     legend.background = element_rect(fill=NA),
+                                                     legend.margin = margin(0.1,0.1,0.1,0.1, unit='cm'),
+                                                     legend.justification = c(0,1),
+                                                     legend.position = "inside",
+                                                     legend.position.inside=c(0.01,0.99),
+                                                     legend.key.width = unit(2, "cm"),
+                                                     legend.key.height = unit(1, "cm"),
+                                                     legend.spacing.y = unit(-0.3, "cm"),
+                                                     axis.text = element_text(color="black"),
+                                                     plot.margin = margin(t=1, r=1.5,b=0,l=1.5, unit = "cm"),
+                                                     plot.title = element_blank()))
+
+p4_og$data[[3]]$linewidth <- 2
+p4_og$data[[4]]$size <- 4
+p4_og$data[[5]]$linewidth <- 2
+p4 <- ggplot_gtable(p4_og)
+
+
+tiff("Figure_3.tiff", units="in", width=25, height=15, res=900)
+plot_grid(p1, p2, p3, p4, labels = c('A', 'B', 'C','D'), label_size = 36)
+dev.off()
+
+```
+
+# Figure 4
+Plot ACC intervals
+95% bootstrapped confidence intervals and 95% Bayesian credible intervals around the ACC for the ATG_NRF2_ARE_CIS endpoint
+Binary mixtures grouped by endpoint 
+```{r}
+# plot ACC comparisons for one endpoint
+# Bootstrap intervals
+acc_plot_info <- data.frame(m4id_mix=mix.results.acc$m4id_mix,
+                            observed=mix.results.acc$acc_mix,
+                            ca=mix.results.acc$acc_ca.tc,
+                            ia=mix.results.acc$acc_ia.tc)
+acc_plot_info$aenm <- mc5_attg_endpts$aenm[match(acc_plot_info$m4id_mix,mc5_attg_endpts$m4id)]
+acc_plot_info$chnm <- mc5_attg_endpts$chnm[match(acc_plot_info$m4id_mix,mc5_attg_endpts$m4id)]
+acc_plot_info$single <- mc5_attg_endpts$acc[match(mix.results.all$potent_sing_id.tc,mc5_attg_endpts$m4id)]
+acc_plot_info <- melt(setDT(acc_plot_info), measure.vars=c("ca","ia","single","observed"),value.name="acc")
+
+acc_plot_info$boot_hi <- NA
+acc_plot_info$boot_lo <- NA
+
+acc_plot_info$boot_hi[acc_plot_info$variable=='ca'] <- sapply(mix.results.acc$acc_boot_ca.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
+acc_plot_info$boot_lo[acc_plot_info$variable=='ca'] <- sapply(mix.results.acc$acc_boot_ca.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
+acc_plot_info$boot_hi[acc_plot_info$variable=='ia'] <- sapply(mix.results.acc$acc_boot_ia.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
+acc_plot_info$boot_lo[acc_plot_info$variable=='ia'] <- sapply(mix.results.acc$acc_boot_ia.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
+acc_plot_info$boot_hi[acc_plot_info$variable=='single'] <- sapply(mix.results.acc$acc_boot_single.tc,
+                                                                  quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
+acc_plot_info$boot_lo[acc_plot_info$variable=='single'] <- sapply(mix.results.acc$acc_boot_single.tc,
+                                                                  quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
+acc_plot_info$boot_hi[acc_plot_info$variable=='observed'] <- sapply(mix.results.acc$acc_boot_mix,
+                                                                  quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
+acc_plot_info$boot_lo[acc_plot_info$variable=='observed'] <- sapply(mix.results.acc$acc_boot_mix,
+                                                                  quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
+
+# Bayesian credible intervals
+
+acc_plot_info$bayes_hi <- NA
+acc_plot_info$bayes_lo <- NA
+
+acc_plot_info$bayes_hi[acc_plot_info$variable=='ca'] <- sapply(mix.results.acc$acc_bayes_ca.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
+acc_plot_info$bayes_lo[acc_plot_info$variable=='ca'] <- sapply(mix.results.acc$acc_bayes_ca.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
+acc_plot_info$bayes_hi[acc_plot_info$variable=='ia'] <- sapply(mix.results.acc$acc_bayes_ia.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
+acc_plot_info$bayes_lo[acc_plot_info$variable=='ia'] <- sapply(mix.results.acc$acc_bayes_ia.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
+acc_plot_info$bayes_hi[acc_plot_info$variable=='single'] <- sapply(mix.results.acc$acc_bayes_single.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
+acc_plot_info$bayes_lo[acc_plot_info$variable=='single'] <- sapply(mix.results.acc$acc_bayes_single.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
+acc_plot_info$bayes_hi[acc_plot_info$variable=='observed'] <- sapply(mix.results.acc$acc_bayes_mix,quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
+acc_plot_info$bayes_lo[acc_plot_info$variable=='observed'] <- sapply(mix.results.acc$acc_bayes_mix,quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
+
+
+acc_plot_info <- subset(acc_plot_info, aenm=='ATG_NRF2_ARE_CIS')
+
+colors_ints <- c("#ffb000","#006299","#be548f", "black")
+
+# plot bootstrap intervals
+p1 <- ggplot(acc_plot_info, aes(x=acc, y=chnm, color=variable)) +
+      geom_point(size=4,position=position_dodge(width=0.5))+ 
+      geom_errorbarh(aes(xmax=acc_plot_info$boot_hi, xmin=acc_plot_info$boot_lo, height=1), linewidth=1,
+                     position=position_dodge(width=0.5))+ 
+      xlab(expression(paste("ACC [",mu, "M]")))+
+      ylab(" ")+
+      ggtitle("Bootstrap Intervals")+
+      scale_color_manual(values = colors_ints,labels=c("CA","IA","Potent Single","Observed"),name="Model: ") +
+      scale_x_log10(labels = label_number(drop0trailing = TRUE))+ #, limits=c(0.001,300)
+      coord_cartesian(xlim=c(min(acc_plot_info$bayes_lo),max(acc_plot_info$bayes_hi)))+
+      theme_bw(base_size=25)+
+      theme(plot.title=element_text(hjust=0.5,face="bold"),
+            legend.position = "bottom")
+# get legend
+legend <- cowplot::get_plot_component(p1,'guide-box-bottom',return_all=TRUE)
+# remove legend
+p1 <- p1 + theme(legend.position = "none")
+# plot Bayesian intervals
+p2 <- ggplot(acc_plot_info, aes(x=acc, y=chnm, color=variable)) +
+      geom_point(size=4,position=position_dodge(width=0.5),,show.legend = FALSE)+ 
+      geom_errorbarh(aes(xmax=acc_plot_info$bayes_hi, xmin=acc_plot_info$bayes_lo, height=1),
+                     linewidth=1,position=position_dodge(width=0.5),show.legend = FALSE)+ 
+      xlab(expression(paste("ACC [",mu, "M]")))+
+      ylab(" ")+
+      ggtitle("Bayesian Intervals")+
+      scale_color_manual(values = colors_ints,labels=c("CA","IA","Potent Single","Observed"),name="Model: ") +
+      scale_x_log10(labels = label_number(drop0trailing = TRUE))+
+      coord_cartesian(xlim=c(min(acc_plot_info$bayes_lo),max(acc_plot_info$bayes_hi)))+
+      theme_bw(base_size=25)+
+      theme(axis.text.y = element_blank(),
+            axis.title.y = element_blank(),
+            axis.ticks.y = element_blank(),
+            plot.title=element_text(hjust=0.5,face="bold"))
+
+
+# Combined Bootstrap and Bayesian plot ACC intervals on one plot
+tiff("Figure_4.tiff", units="in", width=21, height=10, res=800)
+plot_grid(
+  plot_grid(p1,p2,nrow=1,ncol=2,rel_widths=c(2.29,1)),
+  plot_grid(NULL,legend,NULL, nrow=1,rel_widths=c(1,1,0.1)),
+  rel_heights=c(1,0.05),
+  nrow=2
+)
+dev.off()
+
+```
+
+# Figure 5
+Violin plots to compare metrics
+```{r}
+# plot point metrics
+log_acc_diff <- data.frame(ca=fit_quality$diff_acc_ca[!is.na(fit_quality$diff_acc_ca)],
+                           ia=fit_quality$diff_acc_ia[!is.na(fit_quality$diff_acc_ia)],
+                           single=fit_quality$diff_acc_single[!is.na(fit_quality$diff_acc_single)])
+log_acc_diff_plot <- melt(setDT(log_acc_diff), measure.vars=c("ca","ia", "single"))
+
+colors_acc <- c("#E69F00","#0072B2","#CC79A7")
+p1 <- ggplot(log_acc_diff_plot, aes(x=variable,y=value, fill=variable))+
+        geom_violin(alpha=0.5)+
+        geom_boxplot(width=0.1,outliers=TRUE, outlier.size=1.5)+
+        theme_bw()+
+        geom_hline(yintercept=0, linetype=5, linewidth=1, color="gray34")+
+        geom_hline(yintercept= -0.5, linetype=5, color="gray34", linewidth=1) +
+        scale_fill_manual(values=colors_acc) +
+        theme(axis.title.x = element_blank()) +
+        ylab(bquote(log[10](ACC[mix]) - log[10](ACC[model])))+
+        scale_x_discrete(breaks=c("ca","ia","single"),
+                         labels = c("CA Model", "IA Model", "Potent Single"))+
+        ylim(-3,2)+
+        theme(axis.text = element_text(size = 36, color="black"),
+              axis.title = element_text(size = 40),
+              legend.position = "none",
+              plot.margin= margin(t=15,r=40,b=15,l=40))
+
+# repeat for TC chemical library
+log_acc_diff.tc <- data.frame(ca=fit_quality$diff_acc_ca.tc[!is.na(fit_quality$diff_acc_ca.tc)],
+                           ia=fit_quality$diff_acc_ia.tc[!is.na(fit_quality$diff_acc_ia.tc)],
+                           single=fit_quality$diff_acc_single.tc[!is.na(fit_quality$diff_acc_single.tc)])
+log_acc_diff_plot.tc <- melt(setDT(log_acc_diff.tc), measure.vars=c("ca","ia", "single"))
+
+p2 <- ggplot(log_acc_diff_plot.tc, aes(x=variable,y=value, fill=variable))+
+        geom_violin(alpha=0.5)+
+        geom_boxplot(width=0.1,outliers=TRUE, outlier.size=1.5)+
+        theme_bw()+
+        geom_hline(yintercept=0, linetype="dashed", linewidth=1, color="gray34")+
+        geom_hline(yintercept= -0.5, linetype="dashed", color="gray34", linewidth=1) +
+        scale_fill_manual(values=colors_acc) +
+        theme(axis.title.x = element_blank()) +
+        ylab(bquote(log[10](ACC[mix]) - log[10](ACC[model])))+
+        scale_x_discrete(breaks=c("ca","ia","single"),
+                         labels = c("CA Model", "IA Model", "Potent Single"))+
+        ylim(-3,2)+
+        theme(axis.text = element_text(size = 36, color="black"),
+              axis.title = element_text(size = 40),
+              legend.position = "none",
+              plot.margin= margin(t=15,r=40,b=15,l=40))
+
+tiff("Figure_5.tiff", units="in", width=25, height=15, res=800)
+plot_grid(p1, p2, labels = c('A', 'B'), label_size = 40)
+dev.off()
+
+```
+
+# Supplemental
+## Supplemental Appendix I
+### Plot data and model curve results.
+Plot for each analyzed mixture, include whole analysis workflow
+```{r}
+
+num_plots <- nrow(mix.results.all)
+
+plots_data <- lapply(c(1:num_plots),plotdata.func, tc_lib=FALSE)
+plots_data.tc <- lapply(c(1:num_plots),plotdata.func, tc_lib=TRUE)
+plots_caia <- lapply(c(1:num_plots),plotlines.func,
+                     tc=FALSE)
+plots_caia.tc <- lapply(c(1:num_plots),plotlines.func,
+                        tc=TRUE)
+plots_caia_boot <- lapply(c(1:num_plots),plotint.func,tc=FALSE)
+plots_caia_boot.tc <- lapply(c(1:num_plots),plotint.func,tc=TRUE)
+plots_ia_bayes <- lapply(c(1:num_plots),plotbayesintia.func,tc=FALSE)
+plots_ia_bayes.tc <- lapply(c(1:num_plots),plotbayesintia.func,tc=TRUE)
+
+# Open pdf file
+pdf(file= "CAIA_all_results_paper_test6.pdf" )
+for (jj in 1:num_plots){
+  qq <- jj # no order
+  g1 <- plots_data[jj]
+  g2 <- plots_data.tc[jj]
+  g3 <- plots_caia[jj]
+  g4 <- plots_caia.tc[jj]
+  g5 <- plots_caia_boot[jj]
+  g6 <- plots_caia_boot.tc[jj]
+  g7 <- plots_ia_bayes[jj]
+  g8 <- plots_ia_bayes.tc[jj]
+  gridExtra::grid.arrange(grobs=c(g1, g2, g3, g4, g5, g6, g7, g8), ncol=2,
+                          top=textGrob(paste0(mc5[m4id==mix.results.all$m4id_mix[qq],]$chnm, " - ",
+                                              mc5[m4id==mix.results.all$m4id_mix[qq],]$aenm),
+                                       gp = gpar(fontface = 2, fontsize = 10)))
+}
+
+dev.off()
+
+```
+
+## Supplemental Appendix II
+### Plot ACC intervals of all endpoints
+95% bootstrapped confidence intervals and 95% Bayesian credible intervals around the ACC for the mixtures grouped by endpoint 
+```{r}
+# plot ACC comparisons for one endpoint
+# Bootstrap intervals
+acc_plot_info <- data.frame(m4id_mix=mix.results.acc$m4id_mix,
+                            observed=mix.results.acc$acc_mix,
+                            ca=mix.results.acc$acc_ca.tc,
+                            ia=mix.results.acc$acc_ia.tc)
+acc_plot_info$aenm <- mc5_attg_endpts$aenm[match(acc_plot_info$m4id_mix,mc5_attg_endpts$m4id)]
+acc_plot_info$chnm <- mc5_attg_endpts$chnm[match(acc_plot_info$m4id_mix,mc5_attg_endpts$m4id)]
+acc_plot_info$single <- mc5_attg_endpts$acc[match(mix.results.all$potent_sing_id.tc,mc5_attg_endpts$m4id)]
+acc_plot_info <- melt(setDT(acc_plot_info), measure.vars=c("ca","ia","single","observed"),value.name="acc")
+
+acc_plot_info$boot_hi <- NA
+acc_plot_info$boot_lo <- NA
+
+acc_plot_info$boot_hi[acc_plot_info$variable=='ca'] <- sapply(mix.results.acc$acc_boot_ca.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
+acc_plot_info$boot_lo[acc_plot_info$variable=='ca'] <- sapply(mix.results.acc$acc_boot_ca.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
+acc_plot_info$boot_hi[acc_plot_info$variable=='ia'] <- sapply(mix.results.acc$acc_boot_ia.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
+acc_plot_info$boot_lo[acc_plot_info$variable=='ia'] <- sapply(mix.results.acc$acc_boot_ia.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
+acc_plot_info$boot_hi[acc_plot_info$variable=='single'] <- sapply(mix.results.acc$acc_boot_single.tc,
+                                                                  quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
+acc_plot_info$boot_lo[acc_plot_info$variable=='single'] <- sapply(mix.results.acc$acc_boot_single.tc,
+                                                                  quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
+acc_plot_info$boot_hi[acc_plot_info$variable=='observed'] <- sapply(mix.results.acc$acc_boot_mix,
+                                                                  quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
+acc_plot_info$boot_lo[acc_plot_info$variable=='observed'] <- sapply(mix.results.acc$acc_boot_mix,
+                                                                  quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
+
+# Bayesian credible intervals
+
+acc_plot_info$bayes_hi <- NA
+acc_plot_info$bayes_lo <- NA
+
+acc_plot_info$bayes_hi[acc_plot_info$variable=='ca'] <- sapply(mix.results.acc$acc_bayes_ca.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
+acc_plot_info$bayes_lo[acc_plot_info$variable=='ca'] <- sapply(mix.results.acc$acc_bayes_ca.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
+acc_plot_info$bayes_hi[acc_plot_info$variable=='ia'] <- sapply(mix.results.acc$acc_bayes_ia.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
+acc_plot_info$bayes_lo[acc_plot_info$variable=='ia'] <- sapply(mix.results.acc$acc_bayes_ia.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
+acc_plot_info$bayes_hi[acc_plot_info$variable=='single'] <- sapply(mix.results.acc$acc_bayes_single.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
+acc_plot_info$bayes_lo[acc_plot_info$variable=='single'] <- sapply(mix.results.acc$acc_bayes_single.tc,quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
+acc_plot_info$bayes_hi[acc_plot_info$variable=='observed'] <- sapply(mix.results.acc$acc_bayes_mix,quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
+acc_plot_info$bayes_lo[acc_plot_info$variable=='observed'] <- sapply(mix.results.acc$acc_bayes_mix,quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
+
+
+acc_plot_info <- subset(acc_plot_info, aenm=='ATG_NRF2_ARE_CIS')
+
+colors_ints <- c("#ffb000","#006299","#be548f", "black")
+
+# plot bootstrap intervals
+p1 <- ggplot(acc_plot_info, aes(x=acc, y=chnm, color=variable)) +
+      geom_point(size=4,position=position_dodge(width=0.5))+ 
+      geom_errorbarh(aes(xmax=acc_plot_info$boot_hi, xmin=acc_plot_info$boot_lo, height=1), linewidth=1,
+                     position=position_dodge(width=0.5))+ 
+      xlab(expression(paste("ACC [",mu, "M]")))+
+      ylab(" ")+
+      ggtitle("Bootstrap Intervals")+
+      scale_color_manual(values = colors_ints,labels=c("CA","IA","Potent Single","Observed"),name="Model: ") +
+      scale_x_log10(labels = label_number(drop0trailing = TRUE))+ #, limits=c(0.001,300)
+      coord_cartesian(xlim=c(min(acc_plot_info$bayes_lo),max(acc_plot_info$bayes_hi)))+
+      theme_bw(base_size=25)+
+      theme(plot.title=element_text(hjust=0.5,face="bold"),
+            legend.position = "bottom")
+# get legend
+legend <- cowplot::get_plot_component(p1,'guide-box-bottom',return_all=TRUE)
+# remove legend
+p1 <- p1 + theme(legend.position = "none")
+# plot Bayesian intervals
+p2 <- ggplot(acc_plot_info, aes(x=acc, y=chnm, color=variable)) +
+      geom_point(size=4,position=position_dodge(width=0.5),,show.legend = FALSE)+ 
+      geom_errorbarh(aes(xmax=acc_plot_info$bayes_hi, xmin=acc_plot_info$bayes_lo, height=1),
+                     linewidth=1,position=position_dodge(width=0.5),show.legend = FALSE)+ 
+      xlab(expression(paste("ACC [",mu, "M]")))+
+      ylab(" ")+
+      ggtitle("Bayesian Intervals")+
+      scale_color_manual(values = colors_ints,labels=c("CA","IA","Potent Single","Observed"),name="Model: ") +
+      scale_x_log10(labels = label_number(drop0trailing = TRUE))+
+      coord_cartesian(xlim=c(min(acc_plot_info$bayes_lo),max(acc_plot_info$bayes_hi)))+
+      theme_bw(base_size=25)+
+      theme(axis.text.y = element_blank(),
+            axis.title.y = element_blank(),
+            axis.ticks.y = element_blank(),
+            plot.title=element_text(hjust=0.5,face="bold"))
+
+
+# Combined Bootstrap and Bayesian plot ACC intervals on one plot
+# tiff("figure_4_acc_ints_NRF2ARE_example.tiff", units="in", width=21, height=10, res=800)
+# gridExtra::grid.arrange(grobs=list(p1,p2,legend), ncol=2,nrow=2, heights=c(1,0.05),widths=c(2,1),layout.matrix=rbind(c(1,1,2,2),c(NA,NA,3,3)))
+# dev.off()
+tiff("Figure_4.tiff", units="in", width=21, height=10, res=800)
+plot_grid(
+  plot_grid(p1,p2,nrow=1,ncol=2,rel_widths=c(2.29,1)),
+  plot_grid(NULL,legend,NULL, nrow=1,rel_widths=c(1,1,0.1)),
+  rel_heights=c(1,0.05),
+  nrow=2
+)
+dev.off()
+
+```
+
+## Supplemental Figure S1
+### ACC interval widths distributions
+
+```{r}
+# # difference widths
+# ca_boot_conf <- sapply(fit_quality$diff_acc_boot_ca,quantile,c(0.025,0.975),na.rm=TRUE)
+# ca_boot_width <- na.omit(log10(ca_boot_conf[2,])-log10(ca_boot_conf[1,]))
+# 
+# ca_boot_conf.tc <- sapply(fit_quality$diff_acc_boot_ca.tc,quantile,c(0.025,0.975),na.rm=TRUE)
+# ca_boot_width.tc <- na.omit(log10(ca_boot_conf.tc[2,])-log10(ca_boot_conf.tc[1,]))
+# 
+# ca_bayes_cred <- sapply(fit_quality$diff_acc_bayes_ca,quantile,c(0.025,0.975),na.rm=TRUE)
+# ca_bayes_width <- na.omit(log10(ca_bayes_cred[2,])-log10(ca_bayes_cred[1,]))
+# 
+# ca_bayes_cred.tc <- sapply(fit_quality$diff_acc_bayes_ca.tc,quantile,c(0.025,0.975),na.rm=TRUE)
+# ca_bayes_width.tc <- na.omit(log10(ca_bayes_cred.tc[2,])-log10(ca_bayes_cred.tc[1,]))
+# 
+# single_bayes_cred <- sapply(fit_quality$diff_acc_bayes_single,quantile,c(0.025,0.975),na.rm=TRUE)
+# single_bayes_width <- na.omit(log10(single_bayes_cred[2,])-log10(single_bayes_cred[1,]))
+# 
+# single_bayes_cred.tc <- sapply(fit_quality$diff_acc_bayes_single.tc,quantile,c(0.025,0.975),na.rm=TRUE)
+# single_bayes_width.tc <- na.omit(log10(single_bayes_cred.tc[2,])-log10(single_bayes_cred.tc[1,]))
+
+ca_boot_conf <- sapply(mix.results.acc$acc_boot_ca,quantile,c(0.025,0.975),na.rm=TRUE)
+ca_boot_width <- log10(ca_boot_conf[2,])-log10(ca_boot_conf[1,])
+ca_boot_med <- median(ca_boot_width,na.rm=T)
+ca_boot_width_plot <- ifelse((ca_boot_conf[2,]>1000|ca_boot_conf[1,]<0),NA,ca_boot_width)
+
+ca_boot_conf.tc <- sapply(mix.results.acc$acc_boot_ca.tc,quantile,c(0.025,0.975),na.rm=TRUE)
+ca_boot_width.tc <- log10(ca_boot_conf.tc[2,])-log10(ca_boot_conf.tc[1,])
+ca_boot_med.tc <- median(ca_boot_width.tc,na.rm=T)
+ca_boot_width_plot.tc <- ifelse((ca_boot_conf.tc[2,]>1000|ca_boot_conf.tc[1,]<0),NA,ca_boot_width.tc)
+
+ca_bayes_cred <- sapply(mix.results.acc$acc_bayes_ca,quantile,c(0.025,0.975),na.rm=TRUE)
+ca_bayes_width <- log10(ca_bayes_cred[2,])-log10(ca_bayes_cred[1,])
+ca_bayes_med <- median(ca_bayes_width,na.rm=T)
+ca_bayes_width_plot <- ifelse((ca_bayes_cred[2,]>1000|ca_bayes_cred[1,]<0),NA,ca_bayes_width)
+
+ca_bayes_cred.tc <- sapply(mix.results.acc$acc_bayes_ca.tc,quantile,c(0.025,0.975),na.rm=TRUE)
+ca_bayes_width.tc <- log10(ca_bayes_cred.tc[2,])-log10(ca_bayes_cred.tc[1,])
+ca_bayes_med.tc <- median(ca_bayes_width.tc,na.rm=T)
+ca_bayes_width_plot.tc <- ifelse((ca_bayes_cred.tc[2,]>1000|ca_bayes_cred.tc[1,]<0),NA,ca_bayes_width.tc)
+
+single_bayes_cred <- sapply(mix.results.acc$acc_bayes_single,quantile,c(0.025,0.975),na.rm=TRUE)
+single_bayes_width <- log10(single_bayes_cred[2,])-log10(single_bayes_cred[1,])
+
+single_bayes_cred.tc <- sapply(mix.results.acc$acc_bayes_single.tc,quantile,c(0.025,0.975),na.rm=TRUE)
+single_bayes_width.tc <- log10(single_bayes_cred.tc[2,])-log10(single_bayes_cred.tc[1,])
+
+interval_widths <- data.frame(boot=ca_boot_width_plot,boot_tc=ca_boot_width_plot.tc,
+                              bayes=ca_bayes_width_plot, bayes_tc=ca_bayes_width_plot.tc, num=c(1:nrow(mix.results.all)))
+interval_widths_plots <- reshape2::melt(interval_widths,value.name='width', id='num')
+interval_widths_plots$method <- c(rep("Bootstrap",2*nrow(interval_widths)),rep("Bayesian",2*nrow(interval_widths)))
+interval_widths_plots$inputdata <- c(rep("Test",nrow(interval_widths)),rep("Legacy",nrow(interval_widths)),
+                                   rep("Test",nrow(interval_widths)),rep("Legacy",nrow(interval_widths)))
+# p1 <- ggplot(data=na.omit(subset(interval_widths_plots, variable %in% c('boot','boot_tc'))),aes(x=width,group=variable,fill=variable))+
+#   geom_density(adjust=1.5,alpha=0.4)+
+#   theme_bw(base_size=16)+
+#   theme(panel.border = element_blank(),
+#         legend.title = element_blank())+
+#   labs(x=bquote(log[10](ACC[U95]) - log[10](ACC[L95])),y=element_blank())
+# 
+# print(p1)
+dodge <- position_dodge(width = 0.8)
+
+p2 <- ggplot(data=na.omit(interval_widths_plots),aes(x=width,y=method,fill=inputdata))+
+  # geom_violin(data=na.omit(interval_widths_plots),aes(x=width,y=method,fill=variable),adjust=1.5)+
+  geom_violin(alpha=0.5,position=dodge) +
+  # geom_point(data=data.frame(method=c("boot","boot_tc","bayes","bayes_tc"),
+  #                             med=c(ca_boot_med,ca_boot_med.tc,ca_bayes_med,ca_bayes_med.tc)),
+  #            aes(x=med,y=method),shape="|",size=7, label="median")+
+  # geom_jitter(data=data.frame(method=c("Bootstrap","Bootstrap","Bayesian","Bayesian"),
+  #                            inputdata = c("Test","Legacy","Test","Legacy"),
+  #                             med=c(ca_boot_med,ca_boot_med.tc,ca_bayes_med,ca_bayes_med.tc)),
+  #            aes(x=med,y=method),height=2, shape="|",size=7)+
+  # scale_y_discrete(breaks=c("boot","boot_tc","bayes","bayes_tc"), labels=c("Bootstrapped",""), limits)+
+  # stat_summary(fun.y=median, geom="point", shape=23, size=2)+
+  geom_boxplot(width=0.1, color="black", alpha=0.2, outliers=FALSE, show.legend=FALSE,position=dodge) +
+  theme_bw(base_size=28)+
+  theme(panel.border = element_blank(),
+        legend.title = element_blank())+
+  labs(x=bquote(log[10](ACC[U95]) - log[10](ACC[L95])),y=element_blank())
+
+tiff("Figure_S1.tiff", units="in", width=15, height=10, res=800)
+print(p2)
+dev.off()
+
+```
+
+
