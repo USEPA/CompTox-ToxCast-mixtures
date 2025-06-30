@@ -1,0 +1,652 @@
+---
+title: "Mixtures Bioactivity: Exposure Ratio Case Study"
+author: "Rachel Broughton"
+date: "2025-04-09"
+output: html_document
+---
+
+## Setup Environment
+```{r}
+# clear variables
+rm(list = ls())
+
+library(tcplfit2)
+library(tcpl)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(haven)
+library(survey)
+library(rootSolve)
+library(reshape2)
+library(scales)
+library(latex2exp)
+library(gridExtra)
+library(cowplot)
+
+# tcpl database connection
+tcplConf("_dataminer", pass="pass", db="invitrodb", drvr="MySQL", host="ccte-mysql-res.dmap-prod.aws.epa.gov")
+tcplConfList()
+
+source("./scripts/mixture_model_functions.R")
+```
+
+## Load data from NHANES files 
+Load all PFAS chemicals tested by NHANES and select which ones to examine
+'PFC_F.xpt' and 'DEMO_F.xpt' files are from NHANES and were accessed from:
+https://wwwn.cdc.gov/nchs/nhanes/continuousnhanes/default.aspx?BeginYear=2009
+
+```{r}
+# read in NHANES 2009-2010 sample C data
+demo2009_sampleC <- read_xpt("./input/PFC_F.XPT")
+# read in information that relates NHANES chemical identifiers to DTXSIDs
+pfas_chems <- read.csv("./input/pfas.csv")
+# remove rows with NA values to eliminate subjects in sample C who were not tested for all of these chemicals
+# 199/2432 subjects have missing data for these chemicals = 8.18%. Less than the 10%, which is the accepted amount that can be ignored with no adjustments to the weights in the NHANES Analytic Guidelines
+# https://wwwn.cdc.gov/nchs/data/nhanes/analyticguidelines/99-10-analytic-guidelines.pdf
+# https://wwwn.cdc.gov/nchs/nhanes/analyticguidelines.aspx
+sampleC <- na.omit(demo2009_sampleC)
+# change below limit of detection to zero
+sampleC_limit <- ifelse(sampleC[,4]==1,sampleC[,3]<- 0,sampleC[,3] <- sampleC[,3])
+
+# Remove the 3 chemicals not tested in the ToxCast chemical library:DTXSID8031861, DTXSID10624392,DTXSID5062760
+dtxsids_all <- pfas_chems$DSSTox_Substance_Id[!pfas_chems$DSSTox_Substance_Id %in% c('DTXSID8031861', 
+                                                                                 'DTXSID10624392',
+                                                                                 'DTXSID5062760')]
+# check if any chemicals have more than 25% of data below the limit of detection
+below_lld_test <- data.frame(dtxsid=dtxsids_all,lld_frac=NA)
+for(jj in 1:length(dtxsids_all)){
+  chem_id <- pfas_chems$external_id[pfas_chems$DSSTox_Substance_Id==dtxsids_all[jj]]
+  lld_frac <- sum(demo2009_sampleC[,which(colnames(demo2009_sampleC)==chem_id)+1],na.rm=TRUE)/sum(!is.na(demo2009_sampleC[,which(colnames(demo2009_sampleC)==chem_id)]))
+  below_lld_test$lld_frac[jj] <- lld_frac
+}
+# remove chemicals with more than 25% of data below the limit of detection
+dtxsids <- dtxsids_all[below_lld_test$lld_frac <= 0.25]
+# also remove PFDA because has very discrete measurements at lower concentration levels
+dtxsids <- dtxsids[2:5]
+# 4 PFAS chemicals tested in NHANES blood serum samples and in the legacy ToxCast chemical library remain and are able to be used for analysis
+
+# create all combinations of the 4 PFAS chemicals
+pfas_combos_2 <- data.frame(t(combn(dtxsids,2)),X3=NA,X4=NA)
+pfas_combos_3 <- data.frame(t(combn(dtxsids,3)),X4=NA)
+pfas_combos_4 <- data.frame(t(combn(dtxsids,4)))
+pfas_combos <- data.frame(rbind(pfas_combos_2,pfas_combos_3,pfas_combos_4))
+pfas_combos$mix_num <- c(1:nrow(pfas_combos))
+
+pfas_combos$mix_concs <- NA
+# make a dataframe with all subjects for each chemical combo
+# contains sample SEQN number, measured individual chemical and total mixture concentrations in micro-moles/L [uM],
+# and concentration fractions of each component in the mixture
+# 2 chemicals
+for (ii in 1:6){
+  chem_id_1 <- pfas_chems$external_id[pfas_chems$DSSTox_Substance_Id==pfas_combos$X1[ii]]
+  chem_id_2 <- pfas_chems$external_id[pfas_chems$DSSTox_Substance_Id==pfas_combos$X2[ii]]
+  mw1 <- pfas_chems$Structure_MolWt[pfas_chems$DSSTox_Substance_Id==pfas_combos$X1[ii]]
+  mw2 <- pfas_chems$Structure_MolWt[pfas_chems$DSSTox_Substance_Id==pfas_combos$X2[ii]]
+
+  temp <- data.frame(SEQN=sampleC$SEQN,
+                     chem1_conc=sampleC[[chem_id_1]]/mw1,
+                     chem2_conc=sampleC[[chem_id_2]]/mw2)
+  temp$cM_tot <- temp$chem1_conc + temp$chem2_conc
+  temp$cfrac_1 <- temp$chem1_conc/temp$cM_tot
+  temp$cfrac_2 <- temp$chem2_conc/temp$cM_tot
+  pfas_combos$mix_concs[ii] <- list(temp)
+}
+# 3 chemicals
+for (ii in 7:10){
+  chem_id_1 <- pfas_chems$external_id[pfas_chems$DSSTox_Substance_Id==pfas_combos$X1[ii]]
+  chem_id_2 <- pfas_chems$external_id[pfas_chems$DSSTox_Substance_Id==pfas_combos$X2[ii]]
+  chem_id_3 <- pfas_chems$external_id[pfas_chems$DSSTox_Substance_Id==pfas_combos$X3[ii]]
+  mw1 <- pfas_chems$Structure_MolWt[pfas_chems$DSSTox_Substance_Id==pfas_combos$X1[ii]]
+  mw2 <- pfas_chems$Structure_MolWt[pfas_chems$DSSTox_Substance_Id==pfas_combos$X2[ii]]
+  mw3 <- pfas_chems$Structure_MolWt[pfas_chems$DSSTox_Substance_Id==pfas_combos$X3[ii]]
+  temp <- data.frame(SEQN=sampleC$SEQN,
+                     chem1_conc=sampleC[[chem_id_1]]/mw1,
+                     chem2_conc=sampleC[[chem_id_2]]/mw2,
+                     chem3_conc=sampleC[[chem_id_3]]/mw3)
+  temp$cM_tot <- temp$chem1_conc + temp$chem2_conc + temp$chem3_conc
+  temp$cfrac_1 <- temp$chem1_conc/temp$cM_tot
+  temp$cfrac_2 <- temp$chem2_conc/temp$cM_tot
+  temp$cfrac_3 <- temp$chem3_conc/temp$cM_tot
+  pfas_combos$mix_concs[ii] <- list(temp)
+}
+# 4 chemicals
+ii <- 11
+chem_id_1 <- pfas_chems$external_id[pfas_chems$DSSTox_Substance_Id==pfas_combos$X1[ii]]
+chem_id_2 <- pfas_chems$external_id[pfas_chems$DSSTox_Substance_Id==pfas_combos$X2[ii]]
+chem_id_3 <- pfas_chems$external_id[pfas_chems$DSSTox_Substance_Id==pfas_combos$X3[ii]]
+chem_id_4 <- pfas_chems$external_id[pfas_chems$DSSTox_Substance_Id==pfas_combos$X4[ii]]
+mw1 <- pfas_chems$Structure_MolWt[pfas_chems$DSSTox_Substance_Id==pfas_combos$X1[ii]]
+mw2 <- pfas_chems$Structure_MolWt[pfas_chems$DSSTox_Substance_Id==pfas_combos$X2[ii]]
+mw3 <- pfas_chems$Structure_MolWt[pfas_chems$DSSTox_Substance_Id==pfas_combos$X3[ii]]
+mw4 <- pfas_chems$Structure_MolWt[pfas_chems$DSSTox_Substance_Id==pfas_combos$X4[ii]]
+temp <- data.frame(SEQN=sampleC$SEQN,
+                   chem1_conc=sampleC[[chem_id_1]]/mw1,
+                   chem2_conc=sampleC[[chem_id_2]]/mw2,
+                   chem3_conc=sampleC[[chem_id_3]]/mw3,
+                   chem4_conc=sampleC[[chem_id_4]]/mw4)
+temp$cM_tot <- temp$chem1_conc + temp$chem2_conc + temp$chem3_conc + temp$chem4_conc
+temp$cfrac_1 <- temp$chem1_conc/temp$cM_tot
+temp$cfrac_2 <- temp$chem2_conc/temp$cM_tot
+temp$cfrac_3 <- temp$chem3_conc/temp$cM_tot
+temp$cfrac_4 <- temp$chem4_conc/temp$cM_tot
+pfas_combos$mix_concs[ii] <- list(temp)
+```
+
+## Load chemical data from ToxCast
+Select endpoints for analysis of all chemicals and pull data from ToxCast
+```{r}
+# select 3 enpoints for analysis: ATG_PPRE_CIS, ATG_PPARa_TRANS, ATG_PPARg_TRANS
+mc5_aeids <- c(102,132,134)
+# mc5_aeids <- c(97,134)
+mc5_all <- tcplPrepOtpt(tcplLoadData(lvl = 5, fld = "aeid", val = mc5_aeids))
+# subset to get one per chemical
+mc5 <- tcplSubsetChid(tcplPrepOtpt(tcplLoadData(lvl = 5, fld = "aeid", val = mc5_aeids)))
+mc5_filter <- subset(mc5,dsstox_substance_id %in% dtxsids)
+  
+norm_factor_102 <- max(subset(mc5_all, aeid ==102)$top, na.rm=TRUE)
+norm_factor_132 <- max(subset(mc5_all, aeid ==132)$top, na.rm=TRUE)
+norm_factor_134 <- max(subset(mc5_all, aeid ==134)$top, na.rm=TRUE)
+
+mc5_mix_102 <- subset(mc5_filter,aeid==102)
+mc5_mix_132 <- subset(mc5_filter,aeid==132)
+mc5_mix_134 <- subset(mc5_filter,aeid==134)
+
+```
+
+## Choose one endpoint for analysis
+```{r}
+# select one endpoint to analyze at a time
+mc5_data <- mc5_mix_132
+norm_factor <- norm_factor_132
+# load other levels for selected endpoint
+mc3 <- tcplPrepOtpt(tcplLoadData(lvl = 3, type="mc", fld = "aeid", val = c(132)))
+mc4 <- tcplPrepOtpt(tcplLoadData(lvl = 4, type="mc", fld = "aeid", val = c(132)))
+mc4_agg <- tcplPrepOtpt(tcplLoadData(lvl = "agg", type="mc", fld = "aeid", val = c(132)))
+```
+
+## Compute mixture ACC
+Compute the activity concentration at the cutoff as the point of departure using the concentration addition model for all the mixtures
+```{r}
+# 2 chemicals
+pfas_combos$results <- NA
+for (ii in c(1:6)){
+  comp1 <- mc5_data %>% filter(dsstox_substance_id == pfas_combos$X1[ii])
+  comp2 <- mc5_data %>% filter(dsstox_substance_id == pfas_combos$X2[ii])
+  comps <- rbind(comp1,comp2)
+  cfracs <- cbind(pfas_combos$mix_concs[[ii]]$cfrac_1,pfas_combos$mix_concs[[ii]]$cfrac_2)
+  acc_ca <- apply(cfracs,1,ca_point_conc_multi,YY=comps$coff[1],comps=comps)
+  # Compute bioactivity:exposure ratio
+  ber <- acc_ca/pfas_combos$mix_concs[[ii]]$cM_tot
+  # Save in data frame
+  pfas_combos$results[ii] <- list(data.frame(pfas_combos$mix_concs[[ii]],
+                                             acc_ca=acc_ca,
+                                             ber=ber))
+}
+
+# 3 chemicals
+for (ii in c(7:10)){
+  comp1 <- mc5_data %>% filter(dsstox_substance_id == pfas_combos$X1[ii])
+  comp2 <- mc5_data %>% filter(dsstox_substance_id == pfas_combos$X2[ii])
+  comp3 <- mc5_data %>% filter(dsstox_substance_id == pfas_combos$X3[ii])
+  comps <- rbind(comp1,comp2,comp3)
+  cfracs <- cbind(pfas_combos$mix_concs[[ii]]$cfrac_1,pfas_combos$mix_concs[[ii]]$cfrac_2,pfas_combos$mix_concs[[ii]]$cfrac_3)
+  acc_ca <- apply(cfracs,1,ca_point_conc_multi,YY=comps$coff[1],comps=comps)
+  # Compute bioactivity:exposure ratio
+  ber <- acc_ca/pfas_combos$mix_concs[[ii]]$cM_tot
+  pfas_combos$results[ii] <- list(data.frame(pfas_combos$mix_concs[[ii]],
+                                             acc_ca=acc_ca,
+                                             ber=ber))
+}
+
+# 4 chemicals
+ii <- 11
+comp1 <- mc5_data %>% filter(dsstox_substance_id == pfas_combos$X1[ii])
+comp2 <- mc5_data %>% filter(dsstox_substance_id == pfas_combos$X2[ii])
+comp3 <- mc5_data %>% filter(dsstox_substance_id == pfas_combos$X3[ii])
+comp4 <- mc5_data %>% filter(dsstox_substance_id == pfas_combos$X4[ii])
+comps <- rbind(comp1,comp2,comp3,comp4)
+cfracs <- cbind(pfas_combos$mix_concs[[ii]]$cfrac_1,pfas_combos$mix_concs[[ii]]$cfrac_2,
+                pfas_combos$mix_concs[[ii]]$cfrac_3,pfas_combos$mix_concs[[ii]]$cfrac_4)
+acc_ca <- apply(cfracs,1,ca_point_conc_multi,YY=comps$coff[1],comps=comps)
+# Compute bioactivity:exposure ratio
+ber <- acc_ca/pfas_combos$mix_concs[[ii]]$cM_tot
+pfas_combos$results[ii] <- list(data.frame(pfas_combos$mix_concs[[ii]],
+                                           acc_ca=acc_ca,
+                                           ber=ber))
+```
+
+## Get data for single chemicals
+Get single chemical ACC and BER values and analyze by survey demographics
+```{r}
+# match single chemicals
+pfas_single <- data.frame(dtsxid=mc5_mix_132$dsstox_substance_id,acc=mc5_data$acc)
+for (ii in 1:nrow(pfas_single)){
+  chem_id <- pfas_chems$external_id[pfas_chems$DSSTox_Substance_Id==pfas_single$dtsxid[ii]]
+  mw <- pfas_chems$Structure_MolWt[pfas_chems$DSSTox_Substance_Id==pfas_single$dtsxid[ii]]
+  ber <- pfas_single$acc[ii]/(sampleC[[chem_id]]/mw)
+  pfas_single$exposure[ii] <- list(data.frame(SEQN=sampleC$SEQN,
+                                          exp_conc=(sampleC[[chem_id]])/mw,
+                                          ber=ber))
+}
+
+# Summarize lower limits of detection for each chemical
+llod_uM <- c(0.000249931,0.000176694,0.000241505,0.000399896)
+
+for (ii in 1:nrow(pfas_single)){
+  #Demographic data for 2009-2010 data
+  demo2009 <- read_xpt("./input/DEMO_F.XPT")
+  demo2009_wts <- read_xpt("./input/PFC_F.XPT")
+  nhanes_vars_c <- demo2009_wts %>% select(SEQN, WTSC2YR)
+  nhanes_vars <- demo2009 %>% select(SEQN,SDMVPSU,SDMVSTRA,RIAGENDR,RIDAGEYR,RIDRETH1,INDFMPIR)
+  test_df <- merge(pfas_single$exposure[[ii]],nhanes_vars,by="SEQN")
+  pfas_mix_demo <- merge(test_df,nhanes_vars_c,by="SEQN")
+  # convert gender to factor
+  pfas_mix_demo <- pfas_mix_demo %>%
+                      mutate(RIAGENDR = recode(RIAGENDR, `1` = 0L,`2` = 1L))
+  pfas_mix_demo$RIAGENDR <- as.factor(pfas_mix_demo$RIAGENDR)
+  # convert age to factor
+  # seperate below 20 and above 20
+  pfas_mix_demo <- pfas_mix_demo %>% mutate(age_group = ifelse(RIDAGEYR < 20, 0L, 1L))
+  pfas_mix_demo$age_group <- as.factor(pfas_mix_demo$age_group)
+  # convert ratio of family income to poverty to factor
+  pfas_mix_demo <- pfas_mix_demo %>% mutate(income_group = ifelse(INDFMPIR<5, 1L, INDFMPIR))
+  pfas_mix_demo <- pfas_mix_demo %>% mutate(income_group = ifelse(INDFMPIR==5, 2L, income_group))
+  pfas_mix_demo <- pfas_mix_demo %>% mutate(income_group = ifelse(is.na(INDFMPIR), 0L, income_group))
+  # use survey package to apply nhanes weights
+  nhanes_design <- svydesign(id = ~SDMVPSU,
+                             strata = ~SDMVSTRA,
+                             weights = ~WTSC2YR,
+                             nest = TRUE,
+                             data = pfas_mix_demo)
+  # evaluate by whole population median
+  pop_med <- svyquantile(~ber, design = nhanes_design, quantile=c(0.5), ci=TRUE)
+ # evaluate mediants based on survey demographic groups
+  gender_med <- svyby(~ber, ~RIAGENDR,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
+  age_med <- svyby(~ber, ~age_group,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
+  race_med <- svyby(~ber, ~RIDRETH1,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
+  income_med <- svyby(~ber, ~income_group,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
+
+  pfas_single$popmed[ii] <- pop_med$ber[1]
+  pfas_single$malemed[ii] <- gender_med$ber[1]
+  pfas_single$femmed[ii] <- gender_med$ber[2]
+  pfas_single$youngmed[ii] <- age_med$ber[1]
+  pfas_single$oldmed[ii] <- age_med$ber[2]
+  pfas_single$mexamer[ii] <- race_med$ber[1]
+  pfas_single$hispanic[ii] <- race_med$ber[2]
+  pfas_single$white[ii] <- race_med$ber[3]
+  pfas_single$black[ii] <- race_med$ber[4]
+  pfas_single$otherrace[ii] <- race_med$ber[5]
+  pfas_single$lowinc[ii] <- income_med$ber[2]
+  pfas_single$highinc[ii] <- income_med$ber[3]
+  
+  # Repeat for exposure
+  pop_exp <- svyquantile(~exp_conc, design = nhanes_design, quantile=c(0.5), ci=TRUE)
+  gender_exp <- svyby(~exp_conc, ~RIAGENDR,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
+  age_exp <- svyby(~exp_conc, ~age_group,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
+  race_exp <- svyby(~exp_conc, ~RIDRETH1,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
+  income_exp <- svyby(~exp_conc, ~income_group,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
+  
+  pfas_single$popexp[ii] <- pop_exp$exp_conc[1]
+  pfas_single$maleexp[ii] <- gender_exp$exp_conc[1]
+  pfas_single$femexp[ii] <- gender_exp$exp_conc[2]
+  pfas_single$youngexp[ii] <- age_exp$exp_conc[1]
+  pfas_single$oldexp[ii] <- age_exp$exp_conc[2]
+  pfas_single$mexexp[ii] <- race_exp$exp_conc[1]
+  pfas_single$hispexp[ii] <- race_exp$exp_conc[2]
+  pfas_single$whiteexp[ii] <- race_exp$exp_conc[3]
+  pfas_single$blackexp[ii] <- race_exp$exp_conc[4]
+  pfas_single$otherraceexp[ii] <- race_exp$exp_conc[5]
+  pfas_single$lowexp[ii] <- income_exp$exp_conc[2]
+  pfas_single$highexp[ii] <- income_exp$exp_conc[3]
+  
+  # Population ACC
+  pfas_single$popacc[ii] <- pfas_single$acc[ii]
+}
+```
+
+## Anlayze mixtures bioactivity:exposure ratios by survey demographic
+```{r}
+#Demographic data for 2009-2010 data
+demo2009 <- read_xpt("./input/DEMO_F.XPT")
+demo2009_wts <- read_xpt("./input/PFC_F.XPT")
+nhanes_vars_c <- demo2009_wts %>% select(SEQN, WTSC2YR)
+nhanes_vars <- demo2009 %>% select(SEQN,SDMVPSU,SDMVSTRA,RIAGENDR,RIDAGEYR,RIDRETH1,INDFMPIR)
+for (ii in 1:11){
+  test_df <- merge(pfas_combos$results[[ii]],nhanes_vars,by="SEQN")
+  pfas_mix_demo <- merge(test_df,nhanes_vars_c,by="SEQN")
+  # convert gender to factor
+  pfas_mix_demo <- pfas_mix_demo %>%
+                      mutate(RIAGENDR = recode(RIAGENDR, `1` = 0L,`2` = 1L))
+  pfas_mix_demo$RIAGENDR <- as.factor(pfas_mix_demo$RIAGENDR)
+  # convert age to factor
+  # separate below 20 and above 20
+  pfas_mix_demo <- pfas_mix_demo %>% mutate(age_group = ifelse(RIDAGEYR < 20, 0L, 1L))
+  pfas_mix_demo$age_group <- as.factor(pfas_mix_demo$age_group)
+  # convert ratio of family income to poverty to factor
+  pfas_mix_demo <- pfas_mix_demo %>% mutate(income_group = ifelse(INDFMPIR<5, 1L, INDFMPIR))
+  pfas_mix_demo <- pfas_mix_demo %>% mutate(income_group = ifelse(INDFMPIR==5, 2L, income_group))
+  pfas_mix_demo <- pfas_mix_demo %>% mutate(income_group = ifelse(is.na(INDFMPIR), 0L, income_group))
+  # use survey package to apply nhanes weights
+  nhanes_design <- svydesign(id = ~SDMVPSU,
+                             strata = ~SDMVSTRA,
+                             weights = ~WTSC2YR,
+                             nest = TRUE,
+                             data = pfas_mix_demo)
+  # population median analysis
+  pop_med <- svyquantile(~ber, design = nhanes_design, quantile=c(0.5), ci=TRUE)
+  # median analysis by survey demographics
+  gender_med <- svyby(~ber, ~RIAGENDR,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
+  age_med <- svyby(~ber, ~age_group,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
+  race_med <- svyby(~ber, ~RIDRETH1,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
+  income_med <- svyby(~ber, ~income_group,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
+
+  # save median values
+  pfas_combos$popmed[ii] <- pop_med$ber[1]
+  pfas_combos$malemed[ii] <- gender_med$ber[1]
+  pfas_combos$femmed[ii] <- gender_med$ber[2]
+  pfas_combos$youngmed[ii] <- age_med$ber[1]
+  pfas_combos$oldmed[ii] <- age_med$ber[2]
+  pfas_combos$mexamer[ii] <- race_med$ber[1]
+  pfas_combos$hispanic[ii] <- race_med$ber[2]
+  pfas_combos$white[ii] <- race_med$ber[3]
+  pfas_combos$black[ii] <- race_med$ber[4]
+  pfas_combos$otherrace[ii] <- race_med$ber[5]
+  pfas_combos$lowinc[ii] <- income_med$ber[2]
+  pfas_combos$highinc[ii] <- income_med$ber[3]
+  
+  # repeat for exposure concentrations
+  pop_exp <- svyquantile(~cM_tot, design = nhanes_design, quantile=c(0.5), ci=TRUE)
+  gender_exp <- svyby(~cM_tot, ~RIAGENDR,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
+  age_exp <- svyby(~cM_tot, ~age_group,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
+  race_exp <- svyby(~cM_tot, ~RIDRETH1,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
+  income_exp <- svyby(~cM_tot, ~income_group,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
+  
+  pfas_combos$popexp[ii] <- pop_exp$cM_tot[1]
+  pfas_combos$maleexp[ii] <- gender_exp$cM_tot[1]
+  pfas_combos$femexp[ii] <- gender_exp$cM_tot[2]
+  pfas_combos$youngexp[ii] <- age_exp$cM_tot[1]
+  pfas_combos$oldexp[ii] <- age_exp$cM_tot[2]
+  pfas_combos$mexexp[ii] <- race_exp$cM_tot[1]
+  pfas_combos$hispexp[ii] <- race_exp$cM_tot[2]
+  pfas_combos$whiteexp[ii] <- race_exp$cM_tot[3]
+  pfas_combos$blackexp[ii] <- race_exp$cM_tot[4]
+  pfas_combos$otherraceexp[ii] <- race_exp$cM_tot[5]
+  pfas_combos$lowexp[ii] <- income_exp$cM_tot[2]
+  pfas_combos$highexp[ii] <- income_exp$cM_tot[3]
+  
+  # population median ACC
+  pop_acc <- svyquantile(~acc_ca, design = nhanes_design, quantile=c(0.5), ci=TRUE)
+  
+  pfas_combos$popacc[ii] <- pop_acc$acc_ca[1]
+ }
+
+```
+
+## Plot population BER
+Represent distributions as boxplots and plot for each single chemical and mixture
+```{r}
+# combine single and mixture information
+pfas_single <- pfas_single %>% rename_at('dtsxid', ~'X1')
+pfas_single <- pfas_single %>% rename_at('exposure',~'results')
+pfas_combos <- dplyr::bind_rows(pfas_combos,pfas_single)
+
+# names
+for (jj in 1:nrow(pfas_combos)){
+  name1 <- pfas_chems[pfas_chems$DSSTox_Substance_Id==pfas_combos$X1[jj],]$Substance_Name
+  if (is.na(pfas_combos$X2[jj])){
+    chem_name <- name1
+  } else {
+    name2 <- pfas_chems[pfas_chems$DSSTox_Substance_Id==pfas_combos$X2[jj],]$Substance_Name
+    if (is.na(pfas_combos$X3[jj])){
+      chem_name <- paste(name1, "+", name2)
+    } else {
+      name3 <- pfas_chems[pfas_chems$DSSTox_Substance_Id==pfas_combos$X3[jj],]$Substance_Name
+      if (is.na(pfas_combos$X4[jj])){
+        chem_name <- paste(name1, "+", name2, "+", name3)
+      } else {
+        name4 <- pfas_chems[pfas_chems$DSSTox_Substance_Id==pfas_combos$X4[jj],]$Substance_Name
+        chem_name <- paste(name1, "+", name2, "+", name3, "+", name4)
+      }
+    }
+  }
+  pfas_combos$chem_name[jj] <- chem_name
+}
+# order from largest to smallest MOE median
+plot_order <- order(pfas_combos$popmed, decreasing=TRUE)
+# colors
+plot_colors <- hcl.colors(16, palette = "Blues 3")
+
+tiff("ber_population_dists_aeid132.tiff", units="in", width=15, height=11, res=600)
+par(mar=c(15,8,2,1))
+# plot first chemical
+ii <- 1
+test_df <- merge(pfas_combos$results[[plot_order[ii]]],nhanes_vars,by="SEQN")
+pfas_mix_demo <- merge(test_df,nhanes_vars_c,by="SEQN")
+nhanes_design <- svydesign(id = ~SDMVPSU,
+                           strata = ~SDMVSTRA,
+                           weights = ~WTSC2YR,
+                           nest = TRUE,
+                           data = pfas_mix_demo)
+# median analysis
+pop_med <- svyquantile(~ber, design = nhanes_design, quantile=c(0.5), ci=TRUE)
+
+svyboxplot(~ber~1, nhanes_design, all.outliers=TRUE, ylab="BER", xlab=" ",main=" ", names=FALSE, log="y", at=c(1), xlim=c(0.5,15.5), ylim=c(40,20E4),col=c(plot_colors[17-ii]),cex.lab=2,cex.axis=1.5)
+
+# add remaining chemicals to plot
+for(ii in 2:15){
+  test_df <- merge(pfas_combos$results[[plot_order[ii]]],nhanes_vars,by="SEQN")
+  pfas_mix_demo <- merge(test_df,nhanes_vars_c,by="SEQN")
+  nhanes_design <- svydesign(id = ~SDMVPSU,
+                             strata = ~SDMVSTRA,
+                             weights = ~WTSC2YR,
+                             nest = TRUE,
+                             data = pfas_mix_demo)
+  svyboxplot(~ber~1, nhanes_design, all.outliers=TRUE,
+             main=" ", add=TRUE, at=c(ii),col=c(plot_colors[17-ii]), cex.lab=2,cex.axis=1.5)
+}
+axis(1,at = c(1:15),labels=FALSE)
+text(x=c(1:15),y=23,labels=c(pfas_combos$chem_name[plot_order]),srt=45,adj=1,xpd=NA,cex=1.5)
+dev.off()
+
+
+```
+
+## Compare across demographic groups
+Combine single chemical and mixture information to compare bioactivity:exposure ratio medians across demographic groups to the median population
+```{r}
+
+pfas_heatmap <- data.frame(chem_name=pfas_combos$chem_name,
+                           pop_med=pfas_combos$popmed,
+                           Female=pfas_combos$femmed/pfas_combos$popmed,
+                           Male=pfas_combos$malemed/pfas_combos$popmed,
+                           Young=pfas_combos$youngmed/pfas_combos$popmed,
+                           Old=pfas_combos$oldmed/pfas_combos$popmed,
+                           Mexican=pfas_combos$mexamer/pfas_combos$popmed,
+                           Hispanic=pfas_combos$hispanic/pfas_combos$popmed,
+                           White=pfas_combos$white/pfas_combos$popmed,
+                           Black=pfas_combos$black/pfas_combos$popmed,
+                           Other_Race=pfas_combos$otherrace/pfas_combos$popmed,
+                           LowIncome=pfas_combos$lowinc/pfas_combos$popmed,
+                           HighIncome=pfas_combos$highinc/pfas_combos$popmed)
+heatmap_add <- data.frame(chem_name=pfas_combos$chem_name,
+                          pop_ber = pfas_combos$popmed,
+                          female_ber=pfas_combos$femmed,
+                          male_ber=pfas_combos$malemed,
+                          young_ber=pfas_combos$youngmed,
+                          old_ber=pfas_combos$oldmed,
+                          mex_ber=pfas_combos$mexamer,
+                          hisp_ber=pfas_combos$hispanic,
+                          white_ber=pfas_combos$white,
+                          black_ber=pfas_combos$black,
+                          other_ber=pfas_combos$otherrace,
+                          lowinc_ber=pfas_combos$lowinc,
+                          highinc_ber=pfas_combos$highinc)
+ber_order <- order(pfas_heatmap$pop_med, decreasing=TRUE)
+pfas_heatmap <- pfas_heatmap[ber_order,]
+heatmap_add <- heatmap_add[ber_order,]
+
+
+pfas_info_plot1 <- melt(pfas_heatmap,
+                        measure.vars=c("Female","Male","Young","Old","Mexican","Hispanic","White","Black","Other_Race","LowIncome","HighIncome"),
+                        variable.name="demographic")
+pfas_info_plot2 <- melt(heatmap_add,
+                        measure.vars=c("female_ber","male_ber","young_ber","old_ber",
+                                       "mex_ber","hisp_ber","white_ber","black_ber","other_ber","lowinc_ber","highinc_ber"),
+                        value.name="ber")
+pfas_demo_plot <- data.frame(pfas_info_plot1,ber=pfas_info_plot2$ber)
+
+# Bubble plot to compare median BER values of survey demographic groups and median population BER
+p1 <- ggplot(pfas_demo_plot, aes(x=demographic,y=factor(chem_name,unique(chem_name)),size=ber,fill=value))+
+  geom_point(shape=21)+
+  scale_size(range=c(3,12),name="Median BER: ",breaks=c(6E2,1E3,5E3,19.5E3))+ #132
+  # scale_size(range=c(3,12),name="Median BER: ",breaks=c(7.5E2,1E3,5E3,17.5E3))+ #134
+  # scale_size(range=c(3,12),name="Median BER: ",breaks=c(1.85E3,5E3,10E3,30.5E3))+ #102
+  scale_fill_gradientn(colours = c("red","white","midnightblue"),
+                       values=rescale(c(min(pfas_demo_plot$value),1,max(pfas_demo_plot$value))),
+                       limits=c(0.8,1.6),
+                       oob=scales::squish,
+                       name= TeX(r'($\frac{Group\, Median\, BER}{Population\, Median\, BER}: \; \;$)'))+
+  theme_bw(base_size=20)+
+  theme(axis.text.x = element_text(angle=50,hjust=1,vjust=1.0,size=14, color="black"),
+        axis.text.y = element_text(size = 14,color="black"),
+        axis.title = element_blank(),
+        legend.text = element_text(size=14),
+        legend.title=element_text(size=16),
+        legend.position="bottom",
+        legend.box = "vertical",
+        legend.margin=margin(t=0,b=0),
+        legend.key.width=unit(1.5,"cm"),
+        plot.margin=margin(t=30,r=20,b=0,l=20))+
+  guides(size = guide_legend(order = 1),
+         colorbar = guide_legend(order = 2))+
+  scale_x_discrete(labels=c("Female"="Female","Male"="Male",
+                            "Young"="Age < 20 Years", "Old"= expression("Age">="20 Years"),
+                            "Mexican"="Mexican American","Hispanic"="Other Hispanic",
+                            "White"="Non-Hispanic White","Black"="Non-Hispanic Black",
+                            "Other_Race"="Other Race",
+                            "LowIncome"="Family Income:Poverty < 5","HighIncome"=expression("Family Income:Poverty">=5)))
+
+# plot of median ACC values 
+pfas_combos$popacc[c(12:15)] <- pfas_single$popacc
+p2 <- ggplot(pfas_combos[ber_order,], aes(x=popacc,y=factor(chem_name,unique(chem_name))))+
+  geom_point(size=3)+
+  scale_x_log10(limits=c(10,60),labels = label_number(drop0trailing = TRUE))+
+  theme_bw(base_size=20)+
+  xlab(expression(paste("Median Pop. ACC [",mu, "M]")))+ 
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.title.y = element_blank(),
+        axis.title.x = element_text(size=14,margin = margin(t=-100)),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank())
+
+  
+tiff("ber_bubbleplot_aeid132.tiff", units="in", width=12, height=10, res=800)
+plot_grid(p1,p2,align="h",ncol=2, rel_widths=c(4/5,1/5))
+dev.off()
+```
+## Figure S1
+Supplemental plot for ATG_PPRE_CIS and ATG_PPARg_TRANS
+```{r}
+# tiff("ber_bubbleplot_aeid102_134.tiff", units="in", width=20, height=10, res=800)
+# plot_grid(p1,p2,labels='AUTO',label_size=28) #c('A','B'),label_size=32
+# dev.off()
+```
+
+## Figure S2
+Supplemental plot of trends in exposure across demographics
+```{r}
+
+pfas_heatmap <- data.frame(chem_name=pfas_combos$chem_name,
+                           pop_med=pfas_combos$popexp,
+                           Female=pfas_combos$femexp/pfas_combos$popexp,
+                           Male=pfas_combos$maleexp/pfas_combos$popexp,
+                           Young=pfas_combos$youngexp/pfas_combos$popexp,
+                           Old=pfas_combos$oldexp/pfas_combos$popexp,
+                           Mexican=pfas_combos$mexexp/pfas_combos$popexp,
+                           Hispanic=pfas_combos$hispexp/pfas_combos$popexp,
+                           White=pfas_combos$whiteexp/pfas_combos$popexp,
+                           Black=pfas_combos$blackexp/pfas_combos$popexp,
+                           Other_Race=pfas_combos$otherraceexp/pfas_combos$popexp,
+                           LowIncome=pfas_combos$lowexp/pfas_combos$popexp,
+                           HighIncome=pfas_combos$highexp/pfas_combos$popexp)
+heatmap_add <- data.frame(chem_name=pfas_combos$chem_name,
+                          pop_exp = pfas_combos$popexp,
+                          female_exp=pfas_combos$femexp,
+                          male_exp=pfas_combos$maleexp,
+                          young_exp=pfas_combos$youngexp,
+                          old_exp=pfas_combos$oldexp,
+                          mex_exp=pfas_combos$mexexp,
+                          hisp_exp=pfas_combos$hispexp,
+                          white_exp=pfas_combos$whiteexp,
+                          black_exp=pfas_combos$blackexp,
+                          other_exp=pfas_combos$otherraceexp,
+                          lowinc_exp=pfas_combos$lowexp,
+                          highinc_exp=pfas_combos$highexp)
+ber_order <- order(pfas_combos$popmed, decreasing=TRUE)
+pfas_heatmap <- pfas_heatmap[ber_order,]
+heatmap_add <- heatmap_add[ber_order,]
+
+
+pfas_info_plot1 <- melt(pfas_heatmap,
+                        measure.vars=c("Female","Male","Young","Old","Mexican","Hispanic","White","Black","Other_Race","LowIncome","HighIncome"),
+                        variable.name="demographic")
+pfas_info_plot2 <- melt(heatmap_add,
+                        measure.vars=c("female_exp","male_exp","young_exp","old_exp",
+                                       "mex_exp","hisp_exp","white_exp","black_exp","other_exp","lowinc_exp","highinc_exp"),
+                        value.name="exp")
+pfas_demo_plot <- data.frame(pfas_info_plot1,exposure=pfas_info_plot2$exp)
+
+# Bubble plot to compare median BER values of survey demographic groups and median population BER
+p1 <- ggplot(pfas_demo_plot, aes(x=demographic,y=factor(chem_name,unique(chem_name)),size=exposure,fill=value))+
+  geom_point(shape=21)+
+  scale_size(range=c(3,12),name="Median Exposure: ",breaks=c(2.5E-3,1E-2,4.2E-2),labels = label_scientific())+ #132
+  # scale_size(range=c(3,12),name="Median BER: ",breaks=c(7.5E2,1E3,5E3,17.5E3))+ #134
+  # scale_size(range=c(3,12),name="Median BER: ",breaks=c(1.85E3,5E3,10E3,30.5E3))+ #102
+  scale_fill_gradientn(colours = c("midnightblue","white","red"),
+                       values=rescale(c(min(pfas_demo_plot$value),1,max(pfas_demo_plot$value))),
+                       limits=c(0.6,1.3),
+                       oob=scales::squish,
+                       name= TeX(r'($\frac{Group\, Median\, Exposure}{Population\, Median\, Exposure}: \; \;$)'))+
+  theme_bw(base_size=20)+
+  theme(axis.text.x = element_text(angle=50,hjust=1,vjust=1.0,size=14, color="black"),
+        axis.text.y = element_text(size = 14,color="black"),
+        axis.title = element_blank(),
+        legend.text = element_text(size=14),
+        legend.title=element_text(size=16),
+        legend.position="bottom",
+        legend.box = "vertical",
+        legend.margin=margin(t=0,b=0),
+        legend.spacing.x=unit(0,"cm"),
+        legend.key.width=unit(1,"cm"),
+        plot.margin=margin(t=30,r=10,b=0,l=20))+
+  guides(size = guide_legend(order = 1),
+         colorbar = guide_legend(order = 2))+
+  scale_x_discrete(labels=c("Female"="Female","Male"="Male",
+                            "Young"="Age < 20 Years", "Old"= expression("Age">="20 Years"),
+                            "Mexican"="Mexican American","Hispanic"="Other Hispanic",
+                            "White"="Non-Hispanic White","Black"="Non-Hispanic Black",
+                            "Other_Race"="Other Race",
+                            "LowIncome"="Family Income:Poverty < 5","HighIncome"=expression("Family Income:Poverty">=5)))
+
+# plot of median ACC values 
+
+p2 <- ggplot(pfas_combos[ber_order,], aes(x=popexp,y=factor(chem_name,unique(chem_name))))+
+  geom_point(size=3)+
+  scale_x_log10(labels = label_number(drop0trailing = TRUE))+ #limits=c(10,60),
+  theme_bw(base_size=20)+
+  xlab(expression(paste("Median Pop. Exposure [",mu, "M]")))+ 
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.title.y = element_blank(),
+        axis.title.x = element_text(size=14,margin = margin(t=-100)),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank())
+
+  
+tiff("exposure_bubbleplot_aeid132.tiff", units="in", width=12, height=10, res=800)
+plot_grid(p1,p2,align="h",ncol=2, rel_widths=c(7/9,2/9))
+dev.off()
+```
+
