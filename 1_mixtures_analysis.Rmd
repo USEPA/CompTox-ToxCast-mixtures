@@ -28,32 +28,22 @@ source("./scripts/mixture_model_functions.R")
 
 ```
 
-# Load data from test dataset
+# Load pipelined data
+Data is from mixtures experiment (test single components and mixtures) and select legacy single components
+Legacy single components are the same chemicals as test, but fom different experiments
+
 ```{r,eval=FALSE}
 #Pull mixtures data based on spids of experiment "EPA-68HE0B21P0625"
-# mc0 <- tcplPrepOtpt(tcplLoadData(lvl = 0 , fld = "acid", val = c(32:92, 94:113))) #pull level 0 (raw data)for all atg endpoints
-# new.mc0 <- mc0[grep("EPA-68HE0B21P0625", mc0$srcf),] #filter for task order # within source file name colunn
-# 
-# # select only "test" chemicals and not "reference" by removing dsstox_substance_id = NA
-# mc0.filter <- new.mc0[!is.na(dsstox_substance_id)]
-# 
-# spids <- unique(mc0.filter$spid)
+mc0 <- tcplPrepOtpt(tcplLoadData(lvl = 0 , fld = "acid", val = c(32:92, 94:113))) #pull level 0 (raw data)for all atg endpoints
+new.mc0 <- mc0[grep("EPA-68HE0B21P0625", mc0$srcf),] #filter for task order # within source file name colunn
 
-# have spid values for mixture experiment pre-saved
-load("./input/mixture_spids.Rdata")
+# select only "test" chemicals and not "reference" by removing dsstox_substance_id = NA
+mc0.filter <- new.mc0[!is.na(dsstox_substance_id)]
 
-# Load test dataset from this experiment
-mc3 <- tcplPrepOtpt(tcplLoadData(lvl=3, type='mc', fld='spid', val=spids))
-mc4 <- tcplPrepOtpt(tcplLoadData(lvl=4,type='mc', fld='spid', val=spids))
-mc5 <- tcplPrepOtpt(tcplLoadData(lvl=5,type='mc', fld='spid', val=spids))
-mc4_agg <- tcplPrepOtpt(tcplLoadData(lvl="agg",type='mc', fld='spid', val=spids))
-# add flags
-mc6 <- tcplPrepOtpt(tcplLoadData(lvl=6, fld='spid', val=spids, type='mc'))
-setDT(mc6)
-mc6_mthds <- mc6[ , .( mc6_mthd_id = paste(mc6_mthd_id, collapse=",")), by = m4id]
-mc6_flags <- mc6[ , .( flag = paste(flag, collapse=";")), by = m4id]
-mc5$mc6_flags <- mc6_mthds$mc6_mthd_id[match(mc5$m4id, mc6_mthds$m4id)]
-mc5[, flag.length := ifelse(!is.na(mc6_flags), count.fields(textConnection(mc6_flags), sep =','), NA)]
+spids <- unique(mc0.filter$spid)
+## have spid values for mixture experiment pre-saved
+# load("./input/mixture_spids.Rdata")
+# mc5 <- tcplPrepOtpt(tcplLoadData(lvl=5,type='mc', fld='spid', val=spids))
 
 # Map mixtures to single chemical components
 # 11 single chemicals (plus unused Retinoic acid) over 81 endpoints (aeid=63-144)
@@ -62,44 +52,47 @@ ES219_key <- read_excel("./input/ATG_mixtures_upload.xlsx",  sheet = "ES219_key"
 mixtures_uploads <- read_excel("./input/ATG_mixtures_upload.xlsx",  sheet = "Mixtures_upload")
 mixtures_key <- merge(ES219_key, mixtures_uploads, by.x="BOTTLE_ID", by.y="Barcode_mixture")
 
-# separate single chemicals and mixtures by DTXSID
-mc5.single <- mc5 %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.y)
-mc5.mixture <- mc5 %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.x)
-
-# filter for active mixtures with hitc >= 0.9 and non-negative (curve goes from zero to positive max only for now)
-mc5.mixture.filter <- mc5.mixture %>% filter(hitc >= 0.9 & top>=0)
-
 # Load all mc5 level data for Attagene endpoints
 # for finding maximum endpoint 'top' response over all of Attagene by endpoint to use for normalization
 mc5_attg_endpts <- tcplPrepOtpt(tcplLoadData(lvl=5, type = 'mc', fld='aeid',val=c(63:144)))
 
-```
+# test dataset single components
+mc5.test <- mc5_attg_endpts %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.y & (spid %in% spids))
+# tested mixtures data
+mc5.mixture <- mc5_attg_endpts %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.x)
+# filter for active mixtures with hitc >= 0.9 and non-negative (curve goes from zero to positive max only for now)
+mc5.mixture.filter <- mc5.mixture %>% filter(hitc >= 0.9 & top>=0)
 
-# Select and load single component data from legacy ToxCast database
-Same component chemicals, but from legacy ToxCast (and same test mixtures)
-```{r,eval=FALSE}
-# select single chemicals in ToxCast not from mixture experiment
+# filter mc5 by tcplSubset selection for legacy data
 tc_mc5_notmix <- mc5_attg_endpts %>% filter(!(spid %in% spids))
+setDT(tc_mc5_notmix)
 tc_mc5_notmix_filter <- tcplSubsetChid(tc_mc5_notmix)
-
-
-mc5.single.tc <- data.frame(matrix(NA,nrow=nrow(mc5.single), ncol=ncol(tc_mc5_notmix_filter)))
-for (ii in 1:nrow(mc5.single)){
-  mc5.single.tc[ii,] <- tc_mc5_notmix_filter %>% filter(dsstox_substance_id==mc5.single$dsstox_substance_id[ii] & aeid==mc5.single$aeid[ii])
+mc5.legacy <- data.frame(matrix(NA,nrow=nrow(mc5.test), ncol=ncol(tc_mc5_notmix_filter)))
+colnames(mc5.legacy) <- colnames(tc_mc5_notmix_filter)
+for (ii in 1:nrow(mc5.test)){
+  mc5.legacy[ii,] <- tc_mc5_notmix_filter %>% filter(dsstox_substance_id==mc5.test$dsstox_substance_id[ii] & aeid==mc5.test$aeid[ii])
 }
-colnames(mc5.single.tc) <- colnames(tc_mc5_notmix_filter)
-setDT(mc5.single.tc)
+setDT(mc5.legacy)
+spids_tc <- unique(mc5.legacy$spid)
+## have spid values for legacy single component subset presaved
+# load("./input/legacy_spids.Rdata")
 
-spids_tc <- unique(mc5.single.tc$spid)
+# load all mc3, mc4, mc5, and mc6 level data for test single components, legacy single components, and tested mixtures
+m4ids_all <- c(mc5.test$m4id,mc5.mixture$m4id,mc5.legacy$m4id)
+mc4 <- tcplPrepOtpt(tcplLoadData(lvl=4, type = 'mc', fld='m4id',val=m4ids_all))
+mc4_agg <- tcplPrepOtpt(tcplLoadData(lvl="agg", type = 'mc', fld='m4id',val=m4ids_all))
+mc5 <- tcplPrepOtpt(tcplLoadData(lvl=5, type = 'mc', fld='m4id',val=m4ids_all))
+mc3 <- tcplPrepOtpt(tcplLoadData(lvl=3, type = 'mc', fld='m3id',val=unique(mc4_agg$m3id)))
+# add flags
+mc6 <- tcplPrepOtpt(tcplLoadData(lvl=6, fld='m4id', val=m4ids_all, type='mc'))
+setDT(mc6)
+mc6_mthds <- mc6[ , .( mc6_mthd_id = paste(mc6_mthd_id, collapse=",")), by = m4id]
+mc6_flags <- mc6[ , .( flag = paste(flag, collapse=";")), by = m4id]
+mc5$mc6_flags <- mc6_mthds$mc6_mthd_id[match(mc5$m4id, mc6_mthds$m4id)]
+mc5[, flag.length := ifelse(!is.na(mc6_flags), count.fields(textConnection(mc6_flags), sep =','), NA)]
 
-# # load saved selected spids instead of running each time
-# load("./input/mixture_spids_tc.Rdata")
-
-# Load other mc levels for the subset of toxcast nonmixture data
-mc3_tcsubset <- tcplPrepOtpt(tcplLoadData(lvl=3, type = 'mc', fld='spid',val=spids_tc))
-mc4_tcsubset <- tcplPrepOtpt(tcplLoadData(lvl=4, type = 'mc', fld='spid',val=spids_tc))
-mc4_agg_tcsubset <- tcplPrepOtpt(tcplLoadData(lvl="agg", type = 'mc', fld='spid',val=spids_tc))
 ```
+
 # Compute concentration fractions of the individual components in the mixture
 ```{r,eval=FALSE}
 # compute concentration of component in stock mixture
@@ -118,14 +111,16 @@ mixtures_key <- mixtures_key %>%
 
 # Setup dataframes to store results
 ```{r,eval=FALSE}
-#make dataframe to store mixture information, modeled from test dataset
-mix.info <- data.frame(m4id_mix=mc5.mixture.filter$m4id, modl=mc5.mixture.filter$modl, top=mc5.mixture.filter$top, aenm=mc5.mixture.filter$aenm, aeid=mc5.mixture.filter$aeid, chnm=mc5.mixture.filter$chnm, hitc=mc5.mixture.filter$hitc, coff=mc5.mixture.filter$coff, acc=mc5.mixture.filter$acc, bmad=mc5.mixture.filter$bmad, dtxsid=mc5.mixture.filter$dsstox_substance_id, spid=mc5.mixture.filter$spid, fitc=mc5.mixture.filter$fitc, m4id_1=NA, m4id_2=NA, cfrac_1= NA, cfrac_2 = NA)
+# make dataframe to store mixture information, modeled from test dataset
+mix.info <- data.frame(m4id_mix=mc5.mixture.filter$m4id,
+                       select(mc5.mixture.filter,modl,top,aenm,aeid,chnm,hitc,coff,acc,bmad,dsstox_substance_id,spid,fitc),
+                       m4id_1=NA, m4id_2=NA, cfrac_1=NA, cfrac_2=NA)
 
 for (qq in 1:nrow(mc5.mixture.filter)){
   # relate mixture to single components and identify by m4id
   dtxsids <- mixtures_key[mixtures_key$DTXSID.x == mc5.mixture.filter$dsstox_substance_id[qq], ]$DTXSID.y
-  mix.info$m4id_1[qq] <- mc5.single[(dsstox_substance_id==dtxsids[1] & aeid == mc5.mixture.filter$aeid[qq]),]$m4id
-  mix.info$m4id_2[qq] <- mc5.single[(dsstox_substance_id==dtxsids[2] & aeid == mc5.mixture.filter$aeid[qq]),]$m4id
+  mix.info$m4id_1[qq] <- mc5.test[(dsstox_substance_id==dtxsids[1] & aeid == mc5.mixture.filter$aeid[qq]),]$m4id
+  mix.info$m4id_2[qq] <- mc5.test[(dsstox_substance_id==dtxsids[2] & aeid == mc5.mixture.filter$aeid[qq]),]$m4id
   # save concentration fractions
   ci_frac <- mixtures_key[mixtures_key$DTXSID.x == mc5.mixture.filter$dsstox_substance_id[qq], ]$cfrac_mix
   mix.info$cfrac_1[qq] <- ci_frac[1]
@@ -133,23 +128,19 @@ for (qq in 1:nrow(mc5.mixture.filter)){
 }
 
 # make dataframe to store single chemical information from test dataset
-single.info.full <- data.frame(m4id=mc5.single$m4id, modl=mc5.single$modl,
-                          top=mc5.single$top, hitc=mc5.single$hitc,
-                          aeid=mc5.single$aeid, aenm=mc5.single$aenm,
-                          chnm=mc5.single$chnm, bmad=mc5.single$bmad,
-                          coff=mc5.single$coff,
-                          dtxsid=mc5.single$dsstox_substance_id,
-                          spid=mc5.single$spid, fitc=mc5.single$fitc,
-                          acc=mc5.single$acc)
+single.info.full <- select(mc5.test,m4id,modl,top,hitc,aeid,aenm,chnm,bmad,coff,
+                           dsstox_substance_id,spid,fitc,acc)
 
 # select mixtures with at least one active component and positive tops
-single_comp_active <- mc5.single[hitc >= 0.9 & top>=0]
+single_comp_active <- mc5.test[hitc >= 0.9 & top>=0]
 mix.info <- subset(mix.info,((m4id_1 %in% single_comp_active$m4id)|(m4id_2 %in% single_comp_active$m4id)))
 
 # filter outliers
 # remove mixtures with single components that are just at the maximum response and do not capture the slope/AC50
-single_comp_40 <- mc5.single %>% filter(fitc == 40)
+single_comp_40 <- mc5.test %>% filter(fitc == 40 | fitc==36)
 mix.info <- subset(mix.info,!(m4id_1 %in% single_comp_40$m4id)&!(m4id_2 %in% single_comp_40$m4id))
+# remove mixtures that are just at the maximum response and do not capture the slope/AC50
+mix.info <- subset(mix.info,!(fitc==40 | fitc==36))
 # remove the strangely-behaving mixture
 mix.info <- subset(mix.info,!(m4id_mix==12837598))
 
@@ -157,13 +148,15 @@ single.info <- single.info.full %>% filter ((m4id %in% mix.info$m4id_1)|(m4id %i
 
 # Legacy ToxCast chemical library
 # make dataframe to store mixture information, modeled from legacy TC library
-mix.info.tc <- data.frame(m4id_mix=mc5.mixture.filter$m4id, modl=mc5.mixture.filter$modl, top=mc5.mixture.filter$top, aenm=mc5.mixture.filter$aenm, aeid=mc5.mixture.filter$aeid, chnm=mc5.mixture.filter$chnm, hitc=mc5.mixture.filter$hitc, coff=mc5.mixture.filter$coff, acc=mc5.mixture.filter$acc, bmad=mc5.mixture.filter$bmad, dtxsid=mc5.mixture.filter$dsstox_substance_id, spid=mc5.mixture.filter$spid, fitc=mc5.mixture.filter$fitc, m4id_1=NA, m4id_2=NA, cfrac_1= NA, cfrac_2 = NA)
+mix.info.tc <- data.frame(m4id_mix=mc5.mixture.filter$m4id,
+                          select(mc5.mixture.filter,modl,top,aenm,aeid,chnm,hitc,coff,acc,bmad,dsstox_substance_id,spid,fitc),
+                          m4id_1=NA, m4id_2=NA, cfrac_1=NA, cfrac_2=NA)
 
 for (qq in 1:nrow(mc5.mixture.filter)){
   # relate mixture to single components and identify by m4id
   dtxsids <- mixtures_key[mixtures_key$DTXSID.x == mc5.mixture.filter$dsstox_substance_id[qq], ]$DTXSID.y
-  mix.info.tc$m4id_1[qq] <- mc5.single.tc[(dsstox_substance_id==dtxsids[1] & aeid == mc5.mixture.filter$aeid[qq]),]$m4id
-  mix.info.tc$m4id_2[qq] <- mc5.single.tc[(dsstox_substance_id==dtxsids[2] & aeid == mc5.mixture.filter$aeid[qq]),]$m4id
+  mix.info.tc$m4id_1[qq] <- mc5.legacy[(dsstox_substance_id==dtxsids[1] & aeid == mc5.mixture.filter$aeid[qq]),]$m4id
+  mix.info.tc$m4id_2[qq] <- mc5.legacy[(dsstox_substance_id==dtxsids[2] & aeid == mc5.mixture.filter$aeid[qq]),]$m4id
   # save concentration fractions
   ci_frac <- mixtures_key[mixtures_key$DTXSID.x == mc5.mixture.filter$dsstox_substance_id[qq], ]$cfrac_mix
   mix.info.tc$cfrac_1[qq] <- ci_frac[1]
@@ -171,22 +164,18 @@ for (qq in 1:nrow(mc5.mixture.filter)){
 }
 
 # dataframe to store tc single chemical information
-single.info.full.tc <- data.frame(m4id=mc5.single.tc$m4id, modl=mc5.single.tc$modl,
-                          top=mc5.single.tc$top, hitc=mc5.single.tc$hitc,
-                          aeid=mc5.single.tc$aeid, aenm=mc5.single.tc$aenm,
-                          chnm=mc5.single.tc$chnm, bmad=mc5.single.tc$bmad,
-                          coff=mc5.single.tc$coff,
-                          dtxsid=mc5.single.tc$dsstox_substance_id,
-                          spid=mc5.single.tc$spid, fitc=mc5.single.tc$fitc,
-                          acc=mc5.single.tc$acc, bootparams=NA)
+single.info.full.tc <- select(mc5.legacy,m4id,modl,top,hitc,aeid,aenm,chnm,bmad,coff,
+                           dsstox_substance_id,spid,fitc,acc)
 
 # select mixtures with at least one active component and positive tops
-single_comp_active_tc <- mc5.single.tc[hitc >= 0.9 & top>=0]
+single_comp_active_tc <- mc5.legacy[hitc >= 0.9 & top>=0]
 mix.info.tc <- subset(mix.info.tc,((m4id_1 %in% single_comp_active_tc$m4id)|(m4id_2 %in% single_comp_active_tc$m4id)))
 
 # remove mixtures with single components that are just at the maximum response and do not capture the slope/AC50
-single_comp_40_tc <- mc5.single.tc %>% filter(fitc == 40)
+single_comp_40_tc <- mc5.legacy %>% filter(fitc == 40 | fitc==36)
 mix.info.tc <- subset(mix.info.tc,!(m4id_1 %in% single_comp_40_tc$m4id)&!(m4id_2 %in% single_comp_40_tc$m4id))
+# remove mixtures that are just at the maximum response and do not capture the slope/AC50
+mix.info.tc <- subset(mix.info.tc,!(fitc==40 | fitc==36))
 # remove the strangely-behaving mixtures
 mix.info.tc <- subset(mix.info.tc,!(m4id_mix==12837598))
 mix.info.tc <- subset(mix.info.tc, !(m4id_1==12518380) & !(m4id_2==12518380))
@@ -202,8 +191,8 @@ for (ii in 1:nrow(mix.info)){
 }
 
 for (ii in 1:nrow(mix.info.tc)){
-  mix.info.tc$condition1[ii] <- ifelse(mc5_attg_endpts[m4id==mix.info.tc$m4id_1[ii],]$hitc>=0.9,TRUE,FALSE)
-  mix.info.tc$condition2[ii] <- ifelse(mc5_attg_endpts[m4id==mix.info.tc$m4id_2[ii],]$hitc>=0.9,TRUE,FALSE)
+  mix.info.tc$condition1[ii] <- ifelse(mc5[m4id==mix.info.tc$m4id_1[ii],]$hitc>=0.9,TRUE,FALSE)
+  mix.info.tc$condition2[ii] <- ifelse(mc5[m4id==mix.info.tc$m4id_2[ii],]$hitc>=0.9,TRUE,FALSE)
 }
 ```
 
@@ -245,9 +234,9 @@ for (jj in 1:nrow(single.info)){
       modl_params$bmad <- single.info$bmad[jj]
       modl_params$hitc <- single.info$hitc[jj]
       # refit with bootstrap resampling
-      modl_params$bootparams <- list(curve_bootstrap(jj=1, curve.info=modl_params, boot_num=1000,type="single",tc=FALSE))
+      modl_params$bootparams <- list(curve_bootstrap(jj=1, curve.info=modl_params, boot_num=1000,type="single"))
       # refit with Bayesian approach
-      modl_params$bayesparams <- list(bayes_curve(ii=1,curve.info=modl_params, n_iter=10000, n_burn=2000, type="single", poly2_correct=TRUE, tc=FALSE))
+      modl_params$bayesparams <- list(bayes_curve(ii=1,curve.info=modl_params, n_iter=10000, n_burn=10000, type="single", poly2_correct=TRUE))
       poly2_new_modl <- rbind(poly2_new_modl,modl_params,fill=TRUE)
     }
   }
@@ -256,19 +245,19 @@ for (jj in 1:nrow(single.info)){
 for (jj in 1:nrow(single.info.tc)){
   if (single.info.tc$hitc[jj]>=0.9 & single.info.tc$modl[jj]=='poly2'){
     # if the poly2 curve meets the parameter conditions for concave up (a>0 and b<0), then select a different curve shape
-    if(mc5_attg_endpts[m4id==single.info.tc$m4id[jj],]$a > 0 & mc5_attg_endpts[m4id==single.info.tc$m4id[jj],]$b < 0){
-      aics <- dplyr::select(filter(mc4_tcsubset,m4id==single.info.tc$m4id[jj]),ends_with("aic"))
+    if(mc5[m4id==single.info.tc$m4id[jj],]$a > 0 & mc5[m4id==single.info.tc$m4id[jj],]$b < 0){
+      aics <- dplyr::select(filter(mc4,m4id==single.info.tc$m4id[jj]),ends_with("aic"))
       remaining_models <- dplyr::select(aics,!c("poly2_aic","cnst_aic"))
       new_modl <- str_remove(names(which.min(remaining_models)),"_aic")
-      modl_params <- dplyr::select(filter(mc4_tcsubset,m4id==single.info.tc$m4id[jj]),starts_with(new_modl))
+      modl_params <- dplyr::select(filter(mc4,m4id==single.info.tc$m4id[jj]),starts_with(new_modl))
       colnames(modl_params) <- str_remove(names(modl_params),paste0(new_modl,"_"))
       modl_params$modl <- new_modl
       modl_params$m4id <- single.info.tc$m4id[jj]
       modl_params$bmad <- single.info.tc$bmad[jj]
       modl_params$hitc <- single.info.tc$hitc[jj]
       # refit with bootstrap resampling
-      modl_params$bootparams <- list(curve_bootstrap(jj=1, curve.info=modl_params, boot_num=1000,type="single",tc=TRUE))
-      modl_params$bayesparams <- list(bayes_curve(ii=1, curve.info=modl_params, n_iter=10000, n_burn=2000, type="single", poly2_correct=TRUE, tc=TRUE))
+      modl_params$bootparams <- list(curve_bootstrap(jj=1, curve.info=modl_params, boot_num=1000,type="single"))
+      modl_params$bayesparams <- list(bayes_curve(ii=1, curve.info=modl_params, n_iter=10000, n_burn=10000, type="single", poly2_correct=TRUE))
       poly2_new_modl <- rbind(poly2_new_modl,modl_params,fill=TRUE)
     }
   }
@@ -284,23 +273,24 @@ Fit single component concentration-response curves and mixture curves with the b
 ```{r,eval=FALSE}
 # test dataset single curves
 single.info$bootparams <- lapply(c(1:nrow(single.info)), curve_bootstrap,
-                                 curve.info=single.info, boot_num=1000, type="single", tc=FALSE)
+                                 curve.info=single.info, boot_num=1000, type="single")
 single.info$bayesparams <- lapply(c(1:nrow(single.info)), bayes_curve,
-                                  curve.info=single.info, n_iter=10000, n_burn=2000,
-                                  type="single", poly2_correct=FALSE, tc=FALSE)
+                                  curve.info=single.info, n_iter=10000, n_burn=10000,
+                                  type="single", poly2_correct=FALSE)
 
 # legacy ToxCast data single curves
 single.info.tc$bootparams <- lapply(c(1:nrow(single.info.tc)), curve_bootstrap,
-                                 curve.info=single.info.tc, boot_num=1000, type="single", tc=TRUE)
+                                 curve.info=single.info.tc, boot_num=1000, type="single")
 single.info.tc$bayesparams <- lapply(c(1:nrow(single.info.tc)), bayes_curve,
-                                  curve.info=single.info.tc, n_iter=10000, n_burn=2000,
-                                  type="single", poly2_correct=FALSE, tc=TRUE)
+                                  curve.info=single.info.tc, n_iter=10000, n_burn=10000,
+                                  type="single", poly2_correct=FALSE)
+
 # mixtures data curves
 mix.info$bootparams <- lapply(c(1:nrow(mix.info)), curve_bootstrap,
-                                 curve.info=mix.info, boot_num=1000, type="mix", tc=FALSE)
+                                 curve.info=mix.info, boot_num=1000, type="mix")
 mix.info$bayesparams <- lapply(c(1:nrow(mix.info)), bayes_curve,
-                                  curve.info=mix.info, n_iter=10000, n_burn=2000,
-                                  type="mix", poly2_correct=FALSE, tc=FALSE)
+                                  curve.info=mix.info, n_iter=10000, n_burn=10000,
+                                  type="mix", poly2_correct=FALSE)
 
 # mixtures parameters are the same for test dataset and legacy TC
 # match mixtures selected for test dataset with those selected for legacy TC and fit ones that are missing
@@ -309,13 +299,11 @@ mix.info.tc <- merge(mix.info.tc,select(mix.info,m4id_mix,bootparams,bayesparams
 tc_indices <- which(is.na(mix.info.tc$bayesparams))
 mix.info.tc$bootparams[tc_indices] <- lapply(tc_indices, curve_bootstrap,
                                              curve.info=mix.info.tc,
-                                             boot_num=1000,type="mix", 
-                                             tc=FALSE)
+                                             boot_num=1000,type="mix")
 mix.info.tc$bayesparams[tc_indices] <- lapply(tc_indices, bayes_curve,
                                               curve.info=mix.info.tc,
-                                              n_iter=10000, n_burn=2000,
-                                              type="mix", poly2_correct=FALSE, tc=FALSE)
-
+                                              n_iter=10000, n_burn=10000,
+                                              type="mix", poly2_correct=FALSE)
 ```
 
 # Calculate mixture bioactivity at ACC
@@ -328,7 +316,8 @@ mix.results.acc <- data.frame(m4id_mix=all_mix_ids,acc_ca=NA,acc_ia=NA,
                               acc_ca.tc=NA,acc_ia.tc=NA,acc_boot_ca.tc=NA,
                               acc_boot_ia.tc=NA,acc_bayes_ca.tc=NA,
                               acc_bayes_ia.tc=NA,acc_pred_ca.tc=NA,acc_pred_ia.tc=NA)
-mix.results.acc$acc_mix <- mc5_attg_endpts$acc[match(mix.results.acc$m4id_mix,mc5_attg_endpts$m4id)]
+#tcplfit2 observed mixture acc
+mix.results.acc$acc_mix <- mc5$acc[match(mix.results.acc$m4id_mix,mc5$m4id)]
 
 # number of samples from Bayesian posterior iterations
 num_sample <- 1000
@@ -343,8 +332,6 @@ for (ii in 1:nrow(mix.results.acc)){
     mix.results.acc$acc_boot_ia[ii] <- NA
     mix.results.acc$acc_bayes_ca[ii] <- NA
     mix.results.acc$acc_bayes_ia[ii] <- NA
-    mix.results.acc$acc_pred_ca[ii] <- NA
-    mix.results.acc$acc_pred_ia[ii] <- NA
   } else {
     mix_info <- mix.info[mix.info$m4id_mix==mix.results.acc$m4id_mix[ii],]
     comp1 <- mc5[m4id==mix_info$m4id_1]
@@ -391,12 +378,6 @@ for (ii in 1:nrow(mix.results.acc)){
                           cfrac1=cfrac1,cfrac2=cfrac2,condition1=mix_info$condition1,
                           condition2=mix_info$condition2,sample=TRUE)
     mix.results.acc$acc_bayes_ca[ii] <- list(acc_bayes_ca)
-    # bayesian prediction interval ACC CA
-    acc_pred_ca <- sapply(indices,ca_point_pred,YY=comp1$coff,comp1=comp1,
-                         comp2=comp2,params1_samp=bayesparams1,params2_samp=bayesparams2,
-                         cfrac1=cfrac1,cfrac2=cfrac2,condition1=mix_info$condition1,
-                         condition2=mix_info$condition2)
-    mix.results.acc$acc_pred_ca[ii] <- list(acc_pred_ca)
     # compute full curve IA line
     if(comp1$hitc>=0.9 & comp2$hitc<0.9){
       x_vals <- 10^seq(log10(0.01*mc5[m4id==mix.results.acc$m4id_mix[ii],]$conc_min),log10(3*comp1$conc_max/cfrac1),length.out=num_pts)
@@ -407,18 +388,21 @@ for (ii in 1:nrow(mix.results.acc)){
                        log10(3*min(comp1$conc_max/cfrac1,comp2$conc_max/cfrac2)),
                        length.out=num_pts)
     }
-    ia_resps_temp <- ia_full_resp(val=x_vals,comp1=comp1,comp2=comp2,params1=params1,params2=params2,
-                             cfrac1=cfrac1,cfrac2=cfrac2,condition1=mix_info$condition1,
-                             condition2=mix_info$condition2,norm_factor=mix_info$edpt_top,sample=FALSE)
+    ia_resps_temp <- ia_full_resp(val=x_vals,comp1=comp1,comp2=comp2,
+                                  params1=params1,params2=params2,cfrac1=cfrac1,
+                                  cfrac2=cfrac2,condition1=mix_info$condition1,
+                                  condition2=mix_info$condition2,
+                                  norm_factor=mix_info$edpt_top,sample=FALSE)
     # cutoff IA at top (don't include biphasic part)
     ia_resps <- ia_resps_temp[1:which.max(ia_resps_temp)]
     x_vals_eval <- x_vals[1:which.max(ia_resps_temp)]
-    if (max(ia_resps,na.rm=TRUE)<comp1$coff/mix_info$edpt_top){
+    if (max(ia_resps,na.rm=TRUE)<(comp1$coff/mix_info$edpt_top)){
       acc_ia <- 10000
-    } else if (min(ia_resps,na.rm=TRUE)>comp1$coff/mix_info$edpt_top){
+    } else if (min(ia_resps,na.rm=TRUE)>(comp1$coff/mix_info$edpt_top)){
       acc_ia <- -10000
     } else {
-      acc_ia <- approx(x=ia_resps, y=x_vals_eval, xout=comp1$coff/mix_info$edpt_top, rule=1,ties="ordered")[[2]]
+      acc_ia <- approx(x=ia_resps,y=x_vals_eval,xout=comp1$coff/mix_info$edpt_top, 
+                       rule=1,ties="ordered")[[2]]
       # acc_ia <- approx(x=ia_resps, y=x_vals, xout=comp1$coff/mix_info$edpt_top, rule=1,ties=list("ordered",mean))[[2]]
     }
     mix.results.acc$acc_ia[ii] <- acc_ia
@@ -426,8 +410,10 @@ for (ii in 1:nrow(mix.results.acc)){
     acc_boot_ia <- c()
     ia_boot_temp <- lapply(c(1:num_cols),ia_full_resp,val=x_vals,comp1=comp1,
                            comp2=comp2,params1=bootparams1,params2=bootparams2,
-                           cfrac1=cfrac1,cfrac2=cfrac2,condition1=mix_info$condition1,
-                           condition2=mix_info$condition2, norm_factor=mix_info$edpt_top,
+                           cfrac1=cfrac1,cfrac2=cfrac2,
+                           condition1=mix_info$condition1,
+                           condition2=mix_info$condition2,
+                           norm_factor=mix_info$edpt_top,
                            sample=TRUE)
     for (ss in 1:num_cols){
       if (sum(!is.na(ia_boot_temp[[ss]]))==0){
@@ -436,12 +422,14 @@ for (ii in 1:nrow(mix.results.acc)){
         # cutoff IA at top (don't include biphasic part)
         ia_boot <- ia_boot_temp[[ss]][1:which.max(ia_boot_temp[[ss]])]
         x_vals_eval <- x_vals[1:which.max(ia_boot_temp[[ss]])]
-        if (max(ia_boot,na.rm=TRUE)<comp1$coff/mix_info$edpt_top){
+        if (max(ia_boot,na.rm=TRUE)<(comp1$coff/mix_info$edpt_top)){
           acc_ia_boot_temp <- 10000
-        } else if (min(ia_boot,na.rm=TRUE)>comp1$coff/mix_info$edpt_top){
+        } else if (min(ia_boot,na.rm=TRUE)>(comp1$coff/mix_info$edpt_top)){
           acc_ia_boot_temp <- -10000
         } else {
-          acc_ia_boot_temp <- approx(x=ia_boot, y=x_vals_eval, xout=comp1$coff/mix_info$edpt_top, rule=1,ties="ordered")[[2]]
+          acc_ia_boot_temp <- approx(x=ia_boot, y=x_vals_eval, 
+                                     xout=comp1$coff/mix_info$edpt_top, 
+                                     rule=1,ties="ordered")[[2]]
         }
       }
       acc_boot_ia <- append(acc_boot_ia,acc_ia_boot_temp)
@@ -451,8 +439,10 @@ for (ii in 1:nrow(mix.results.acc)){
     acc_bayes_ia <- c()
     ia_bayes_temp <- lapply(indices,ia_full_resp,val=x_vals,comp1=comp1,
                            comp2=comp2,params1=bayesparams1,params2=bayesparams2,
-                           cfrac1=cfrac1,cfrac2=cfrac2,condition1=mix_info$condition1,
-                           condition2=mix_info$condition2, norm_factor=mix_info$edpt_top,
+                           cfrac1=cfrac1,cfrac2=cfrac2,
+                           condition1=mix_info$condition1,
+                           condition2=mix_info$condition2, 
+                           norm_factor=mix_info$edpt_top,
                            sample=TRUE)
     for (ss in 1:num_sample){
       if (sum(!is.na(ia_bayes_temp[[ss]]))==0){
@@ -461,48 +451,19 @@ for (ii in 1:nrow(mix.results.acc)){
         # cutoff IA at top (don't include biphasic part)
         ia_bayes <- ia_bayes_temp[[ss]][1:which.max(ia_bayes_temp[[ss]])]
         x_vals_eval <- x_vals[1:which.max(ia_bayes_temp[[ss]])]
-        if (max(ia_bayes,na.rm=TRUE)<comp1$coff/mix_info$edpt_top){
+        if (max(ia_bayes,na.rm=TRUE)<(comp1$coff/mix_info$edpt_top)){
           acc_ia_bayes_temp <- 10000
-        } else if (min(ia_resps,na.rm=TRUE)>comp1$coff/mix_info$edpt_top){
+        } else if (min(ia_resps,na.rm=TRUE)>(comp1$coff/mix_info$edpt_top)){
           acc_ia_bayes_temp <- -10000
         } else {
-          acc_ia_bayes_temp <- approx(x=ia_bayes, y=x_vals_eval, xout=comp1$coff/mix_info$edpt_top,
-                           rule=1,ties="ordered")[[2]]
+          acc_ia_bayes_temp <- approx(x=ia_bayes, y=x_vals_eval, 
+                                      xout=comp1$coff/mix_info$edpt_top,
+                                      rule=1,ties="ordered")[[2]]
         }
       }
       acc_bayes_ia <- append(acc_bayes_ia,acc_ia_bayes_temp)
     }
     mix.results.acc$acc_bayes_ia[ii] <- list(acc_bayes_ia)
-    # Bayesian prediction interval IA
-    ia_pred_curve <- lapply(indices, ia_full_pred, comp1=comp1,comp2=comp2,
-                       cfrac1=cfrac1,cfrac2=cfrac2,params1=bayesparams1,
-                       params2=bayesparams2,norm_factor=mix_info$edpt_top,
-                       x_vals=x_vals,condition1=mix_info$condition1,
-                       condition2=mix_info$condition2)
-    acc_pred_ia <- c()
-    for (zz in 1:length(indices)){
-      if (sum(!is.na(ia_pred_curve[[zz]]))==0){
-        acc_ia_temp <- NA
-      } else{
-      # ia_resps_pred_temp <- ia_pred_curve[,zz]
-      # cutoff IA at top (don't include biphasic part)
-      # ia_resps_pred <- ia_pred_curve[1:which.max(ia_pred_curve[,zz]),zz]
-        ia_resps_pred <- ia_pred_curve[[zz]][1:which.max(ia_pred_curve[[zz]])]
-        x_vals_eval <- x_vals[1:which.max(ia_pred_curve[[zz]])]
-        if (max(ia_resps_pred,na.rm=TRUE)<comp1$coff/mix_info$edpt_top){
-          acc_ia_temp <- 10000
-        } else if (min(ia_resps_pred,na.rm=TRUE)>comp1$coff/mix_info$edpt_top){
-          acc_ia_temp <- -10000
-        } else {
-          acc_ia_temp <- approx(x=ia_resps_pred, y=x_vals_eval, xout=comp1$coff/mix_info$edpt_top,
-                           rule=1,ties="ordered")[[2]]
-          # acc_ia <- approx(x=ia_resps, y=x_vals, xout=comp1$coff/mix_info$edpt_top, rule=1,ties=list("ordered",mean))[[2]]
-        }
-      }
-      acc_pred_ia <- append(acc_pred_ia,acc_ia_temp)
-    }
-    mix.results.acc$acc_pred_ia[ii] <- list(acc_pred_ia)
-
   }
 }
     
@@ -515,12 +476,10 @@ for (ii in 1:nrow(mix.results.acc)){
     mix.results.acc$acc_boot_ia.tc[ii] <- NA
     mix.results.acc$acc_bayes_ca.tc[ii] <- NA
     mix.results.acc$acc_bayes_ia.tc[ii] <- NA
-    mix.results.acc$acc_pred_ca.tc[ii] <- NA
-    mix.results.acc$acc_pred_ia.tc[ii] <- NA
   } else {
     mix_info <- mix.info.tc[mix.info.tc$m4id_mix==mix.results.acc$m4id_mix[ii],]
-    comp1 <- mc5_attg_endpts[m4id==mix_info$m4id_1]
-    comp2 <- mc5_attg_endpts[m4id==mix_info$m4id_2]
+    comp1 <- mc5[m4id==mix_info$m4id_1]
+    comp2 <- mc5[m4id==mix_info$m4id_2]
     # if curve is poly2 and concave up (negative in concentration range), then replace with alternative curve shape
     if (comp1$hitc >= 0.9 & comp1$modl=='poly2' & comp1$a>0 & comp1$b<0){
       params1 <- poly2_new_modl[m4id==mix_info$m4id_1,]
@@ -563,12 +522,6 @@ for (ii in 1:nrow(mix.results.acc)){
                           cfrac1=cfrac1,cfrac2=cfrac2,condition1=mix_info$condition1,
                           condition2=mix_info$condition2,sample=TRUE)
     mix.results.acc$acc_bayes_ca.tc[ii] <- list(acc_bayes_ca)
-    # bayesian prediction interval ACC CA
-    acc_pred_ca <- sapply(indices,ca_point_pred,YY=comp1$coff,comp1=comp1,
-                         comp2=comp2,params1_samp=bayesparams1,params2_samp=bayesparams2,
-                         cfrac1=cfrac1,cfrac2=cfrac2,condition1=mix_info$condition1,
-                         condition2=mix_info$condition2)
-    mix.results.acc$acc_pred_ca.tc[ii] <- list(acc_pred_ca)
     # compute full curve IA line
     if(comp1$hitc>=0.9 & comp2$hitc<0.9){
       x_vals <- 10^seq(log10(0.01*mc5[m4id==mix.results.acc$m4id_mix[ii],]$conc_min),log10(3*comp1$conc_max/cfrac1),length.out=num_pts)
@@ -579,18 +532,22 @@ for (ii in 1:nrow(mix.results.acc)){
                        log10(3*min(comp1$conc_max/cfrac1,comp2$conc_max/cfrac2)),
                        length.out=num_pts)
     }
-    ia_resps_temp <- ia_full_resp(val=x_vals,comp1=comp1,comp2=comp2,params1=params1,params2=params2,
-                             cfrac1=cfrac1,cfrac2=cfrac2,condition1=mix_info$condition1,
-                             condition2=mix_info$condition2,norm_factor=mix_info$edpt_top,sample=FALSE)
+    ia_resps_temp <- ia_full_resp(val=x_vals,comp1=comp1,comp2=comp2,
+                                  params1=params1,params2=params2,
+                                  cfrac1=cfrac1,cfrac2=cfrac2,
+                                  condition1=mix_info$condition1,
+                                  condition2=mix_info$condition2,
+                                  norm_factor=mix_info$edpt_top,sample=FALSE)
     # cutoff IA at top (don't include biphasic part)
     ia_resps <- ia_resps_temp[1:which.max(ia_resps_temp)]
     x_vals_eval <- x_vals[1:which.max(ia_resps_temp)]
-    if (max(ia_resps,na.rm=TRUE)<comp1$coff/mix_info$edpt_top){
+    if (max(ia_resps,na.rm=TRUE)<(comp1$coff/mix_info$edpt_top)){
       acc_ia <- 10000
-    } else if (min(ia_resps,na.rm=TRUE)>comp1$coff/mix_info$edpt_top){
+    } else if (min(ia_resps,na.rm=TRUE)>(comp1$coff/mix_info$edpt_top)){
       acc_ia <- -10000
     } else {
-      acc_ia <- approx(x=ia_resps, y=x_vals_eval, xout=comp1$coff/mix_info$edpt_top, rule=1,ties="ordered")[[2]]
+      acc_ia <- approx(x=ia_resps,y=x_vals_eval,xout=comp1$coff/mix_info$edpt_top, 
+                       rule=1,ties="ordered")[[2]]
       # acc_ia <- approx(x=ia_resps, y=x_vals, xout=comp1$coff/mix_info$edpt_top, rule=1,ties=list("ordered",mean))[[2]]
     }
     mix.results.acc$acc_ia.tc[ii] <- acc_ia
@@ -598,8 +555,10 @@ for (ii in 1:nrow(mix.results.acc)){
     acc_boot_ia <- c()
     ia_boot_temp <- lapply(c(1:num_cols),ia_full_resp,val=x_vals,comp1=comp1,
                            comp2=comp2,params1=bootparams1,params2=bootparams2,
-                           cfrac1=cfrac1,cfrac2=cfrac2,condition1=mix_info$condition1,
-                           condition2=mix_info$condition2, norm_factor=mix_info$edpt_top,
+                           cfrac1=cfrac1,cfrac2=cfrac2,
+                           condition1=mix_info$condition1,
+                           condition2=mix_info$condition2, 
+                           norm_factor=mix_info$edpt_top,
                            sample=TRUE)
     for (ss in 1:num_cols){
       if (sum(!is.na(ia_boot_temp[[ss]]))==0){
@@ -608,12 +567,14 @@ for (ii in 1:nrow(mix.results.acc)){
         # cutoff IA at top (don't include biphasic part)
         ia_boot <- ia_boot_temp[[ss]][1:which.max(ia_boot_temp[[ss]])]
         x_vals_eval <- x_vals[1:which.max(ia_boot_temp[[ss]])]
-        if (max(ia_boot,na.rm=TRUE)<comp1$coff/mix_info$edpt_top){
+        if (max(ia_boot,na.rm=TRUE)<(comp1$coff/mix_info$edpt_top)){
           acc_ia_boot_temp <- 10000
-        } else if (min(ia_boot,na.rm=TRUE)>comp1$coff/mix_info$edpt_top){
+        } else if (min(ia_boot,na.rm=TRUE)>(comp1$coff/mix_info$edpt_top)){
           acc_ia_boot_temp <- -10000
         } else {
-          acc_ia_boot_temp <- approx(x=ia_boot, y=x_vals_eval, xout=comp1$coff/mix_info$edpt_top, rule=1,ties="ordered")[[2]]
+          acc_ia_boot_temp <- approx(x=ia_boot, y=x_vals_eval, 
+                                     xout=comp1$coff/mix_info$edpt_top, 
+                                     rule=1,ties="ordered")[[2]]
         }
       }
       acc_boot_ia <- append(acc_boot_ia,acc_ia_boot_temp)
@@ -623,8 +584,10 @@ for (ii in 1:nrow(mix.results.acc)){
     acc_bayes_ia <- c()
     ia_bayes_temp <- lapply(indices,ia_full_resp,val=x_vals,comp1=comp1,
                            comp2=comp2,params1=bayesparams1,params2=bayesparams2,
-                           cfrac1=cfrac1,cfrac2=cfrac2,condition1=mix_info$condition1,
-                           condition2=mix_info$condition2, norm_factor=mix_info$edpt_top,
+                           cfrac1=cfrac1,cfrac2=cfrac2,
+                           condition1=mix_info$condition1,
+                           condition2=mix_info$condition2, 
+                           norm_factor=mix_info$edpt_top,
                            sample=TRUE)
     for (ss in 1:num_sample){
       if (sum(!is.na(ia_bayes_temp[[ss]]))==0){
@@ -633,48 +596,19 @@ for (ii in 1:nrow(mix.results.acc)){
         # cutoff IA at top (don't include biphasic part)
         ia_bayes <- ia_bayes_temp[[ss]][1:which.max(ia_bayes_temp[[ss]])]
         x_vals_eval <- x_vals[1:which.max(ia_bayes_temp[[ss]])]
-        if (max(ia_bayes,na.rm=TRUE)<comp1$coff/mix_info$edpt_top){
+        if (max(ia_bayes,na.rm=TRUE)<(comp1$coff/mix_info$edpt_top)){
           acc_ia_bayes_temp <- 10000
-        } else if (min(ia_resps,na.rm=TRUE)>comp1$coff/mix_info$edpt_top){
+        } else if (min(ia_resps,na.rm=TRUE)>(comp1$coff/mix_info$edpt_top)){
           acc_ia_bayes_temp <- -10000
         } else {
-          acc_ia_bayes_temp <- approx(x=ia_bayes, y=x_vals_eval, xout=comp1$coff/mix_info$edpt_top,
-                           rule=1,ties="ordered")[[2]]
+          acc_ia_bayes_temp <- approx(x=ia_bayes,y=x_vals_eval, 
+                                      xout=comp1$coff/mix_info$edpt_top,
+                                      rule=1,ties="ordered")[[2]]
         }
       }
       acc_bayes_ia <- append(acc_bayes_ia,acc_ia_bayes_temp)
     }
     mix.results.acc$acc_bayes_ia.tc[ii] <- list(acc_bayes_ia)
-    # Bayesian prediction interval IA
-    ia_pred_curve <- lapply(indices, ia_full_pred, comp1=comp1,comp2=comp2,
-                       cfrac1=cfrac1,cfrac2=cfrac2,params1=bayesparams1,
-                       params2=bayesparams2,norm_factor=mix_info$edpt_top,
-                       x_vals=x_vals,condition1=mix_info$condition1,
-                       condition2=mix_info$condition2)
-    acc_pred_ia <- c()
-    for (zz in 1:length(indices)){
-      if (sum(!is.na(ia_pred_curve[[zz]]))==0){
-        acc_ia_temp <- NA
-      } else{
-      # ia_resps_pred_temp <- ia_pred_curve[,zz]
-      # cutoff IA at top (don't include biphasic part)
-      # ia_resps_pred <- ia_pred_curve[1:which.max(ia_pred_curve[,zz]),zz]
-        ia_resps_pred <- ia_pred_curve[[zz]][1:which.max(ia_pred_curve[[zz]])]
-        x_vals_eval <- x_vals[1:which.max(ia_pred_curve[[zz]])]
-        if (max(ia_resps_pred,na.rm=TRUE)<comp1$coff/mix_info$edpt_top){
-          acc_ia_temp <- 10000
-        } else if (min(ia_resps_pred,na.rm=TRUE)>comp1$coff/mix_info$edpt_top){
-          acc_ia_temp <- -10000
-        } else {
-          acc_ia_temp <- approx(x=ia_resps_pred, y=x_vals_eval, xout=comp1$coff/mix_info$edpt_top,
-                           rule=1,ties="ordered")[[2]]
-          # acc_ia <- approx(x=ia_resps, y=x_vals, xout=comp1$coff/mix_info$edpt_top, rule=1,ties=list("ordered",mean))[[2]]
-        }
-      }
-      acc_pred_ia <- append(acc_pred_ia,acc_ia_temp)
-    }
-    mix.results.acc$acc_pred_ia.tc[ii] <- list(acc_pred_ia)
-
   }
 }
 
@@ -744,15 +678,15 @@ for (ii in 1:nrow(mix.results.all)){
     }
     cfrac1 <- mix_info$cfrac_1
     cfrac2 <- mix_info$cfrac_2
-    comp1_min <- single_curve_min(dat=comp1,params=params1) + 1E-20 # add to avoid zero
-    comp1_top <- single_curve_top(dat=comp1,params=params1) # top within concentration range, not true top
-    # set to small positive number if the minimum is negative. This happend for a concave up poly2 curve 
-    if (comp1_min < 0){
+    comp1_min <- single_curve_min(dat=comp1,params=params1) #+ 1E-20 # add to avoid zero
+    comp1_top <- single_curve_top(dat=comp1,params=params1) # top modeled response within concentration range
+    # set to small positive number to avoid zero and negative numbers
+    if (comp1_min <= 0){
       comp1_min <- 1E-20
     }
-    comp2_min <- single_curve_min(dat=comp2,params=params2) + 1E-20 # add to avoid zero
-    comp2_top <- single_curve_top(dat=comp2,params=params2) # top within concentration range, not true top
-    if (comp2_min <0){
+    comp2_min <- single_curve_min(dat=comp2,params=params2) #+ 1E-20 # add to avoid zero
+    comp2_top <- single_curve_top(dat=comp2,params=params2) # top modeled response within concentration range
+    if (comp2_min <= 0){
       comp2_min <- 1E-20
     }
     # set-up y-values to calculate CA line and x-values to calculate IA model
@@ -814,9 +748,10 @@ for (ii in 1:nrow(mix.results.all)){
     }
     mix.results.all$ca_predint[ii] <- list(dat_ca_eval)
     # compute full curve IA line model
-    ia_resps <- ia_full_resp(val=x_vals,comp1=comp1,comp2=comp2,params1=params1,params2=params2,
-                             cfrac1=cfrac1,cfrac2=cfrac2,condition1=mix_info$condition1,
-                             condition2=mix_info$condition2,norm_factor=mix_info$edpt_top,sample=FALSE)
+    ia_resps <- ia_full_resp(val=x_vals,comp1=comp1,comp2=comp2,params1=params1,
+                             params2=params2,cfrac1=cfrac1,cfrac2=cfrac2,
+                             condition1=mix_info$condition1,condition2=mix_info$condition2
+                             ,norm_factor=mix_info$edpt_top,sample=FALSE)
     mix.results.all$ia_curve[ii] <- list(data.frame(conc=x_vals,resp=ia_resps))
     # compute full curve IA bootstrap 95% confidence interval
     ia_boot <- sapply(c(1:min(nrow(bootparams1),nrow(bootparams2))),ia_full_resp,
@@ -861,8 +796,8 @@ for (ii in 1:nrow(mix.results.all)){
     mix.results.all$ia_predint.tc[ii] <- NA
   } else {
     mix_info <- mix.info.tc[mix.info.tc$m4id_mix==mix.results.all$m4id_mix[ii],]
-    comp1 <- mc5_attg_endpts[m4id==mix_info$m4id_1]
-    comp2 <- mc5_attg_endpts[m4id==mix_info$m4id_2]
+    comp1 <- mc5[m4id==mix_info$m4id_1]
+    comp2 <- mc5[m4id==mix_info$m4id_2]
     # pull mixtures observed data points for CA prediction interval calculation
     mix_dat <- mc3 %>% filter(m3id %in% mc4_agg$m3id[which(mc4_agg$m4id==mix_info$m4id_mix)])
     # select observed mixture data up to mixture top (monotonic part only) for CA pred int calculation
@@ -895,7 +830,7 @@ for (ii in 1:nrow(mix.results.all)){
     }
     cfrac1 <- mix_info$cfrac_1
     cfrac2 <- mix_info$cfrac_2
-    comp1_min <- single_curve_min(dat=comp1,params=params1) + 1E-20 # add to avoid zero
+    comp1_min <- single_curve_min(dat=comp1,params=params1) + 1E-20 # add to avoid zero # CHANGE this to add to the comp1_min if <=0
     comp1_top <- single_curve_top(dat=comp1,params=params1) # top within concentration range, not true top
     # set to small positive number if the minimum is negative. This happend for a concave up poly2 curve 
     if (comp1_min < 0){
@@ -908,17 +843,17 @@ for (ii in 1:nrow(mix.results.all)){
     }
     # set-up y-values to calculate CA line and x-values to calculate IA model
     if(comp1$hitc>=0.9 & comp2$hitc<0.9){
-      # put response values from 0-1 on a log scale and the rest with even spacing to get good coverage of points
+      # put response values from minimum response (~0) to the cutoff on a log scale and the rest with even spacing to get good coverage of points
       y_vals <- c(10^seq(log10(comp1_min),log10(mix_info$coff),length.out=(2*num_pts/3)),seq(mix_info$coff+0.01,comp1_top,length.out=(num_pts/3)))
       x_vals <- 10^seq(log10(mc5[m4id==mix.results.all$m4id_mix[ii],]$conc_min),log10(comp1$conc_max/cfrac1),length.out=num_pts)
       dat_ca_eval <- subset(dat_ca_eval_full,resp<=comp1_top)
     }else if(comp2$hitc>=0.9 & comp1$hitc<0.9){
-      # put response values from 0-1 on a log scale and the rest with even spacing to get good coverage of points
+      # put response values from minimum response (~0) to the cutoff on a log scale and the rest with even spacing to get good coverage of points
       y_vals <- c(10^seq(log10(comp2_min),log10(mix_info$coff),length.out=(2*num_pts/3)),seq(mix_info$coff+0.01,comp2_top,length.out=(num_pts/3)))
       x_vals <- 10^seq(log10(mc5[m4id==mix.results.all$m4id_mix[ii],]$conc_min),log10(comp2$conc_max/cfrac2),length.out=num_pts)
       dat_ca_eval <- subset(dat_ca_eval_full,resp<=comp2_top)
     }else if(comp1$hitc>=0.9 & comp2$hitc>=0.9){
-      # put response values from 0-1 on a log scale and the rest with even spacing to get good coverage of points
+      # put response values from minimum response (~0) to the cutoff on a log scale and the rest with even spacing to get good coverage of points
       y_vals <- c(10^seq(log10(max(comp1_min,comp2_min)),log10(mix_info$coff),length.out=(2*num_pts/3)),
                   seq(mix_info$coff+0.01,max(comp1_top,comp2_top),length.out=(num_pts/3)))
       x_vals <- 10^seq(log10(mc5[m4id==mix.results.all$m4id_mix[ii],]$conc_min),
@@ -966,9 +901,11 @@ for (ii in 1:nrow(mix.results.all)){
     mix.results.all$ca_predint.tc[ii] <- list(dat_ca_eval)
     
     # compute full curve IA line model
-    ia_resps <- ia_full_resp(val=x_vals,comp1=comp1,comp2=comp2,params1=params1,params2=params2,
-                             cfrac1=cfrac1,cfrac2=cfrac2,condition1=mix_info$condition1,
-                             condition2=mix_info$condition2,norm_factor=mix_info$edpt_top,sample=FALSE)
+    ia_resps <- ia_full_resp(val=x_vals,comp1=comp1,comp2=comp2,params1=params1,
+                             params2=params2,cfrac1=cfrac1,cfrac2=cfrac2,
+                             condition1=mix_info$condition1,
+                             condition2=mix_info$condition2,
+                             norm_factor=mix_info$edpt_top,sample=FALSE)
     mix.results.all$ia_curve.tc[ii] <- list(data.frame(conc=x_vals,resp=ia_resps))
     # compute full curve IA bootstrap 95% confidence interval
     ia_boot <- sapply(c(1:min(nrow(bootparams1),nrow(bootparams2))),ia_full_resp,
@@ -1029,11 +966,11 @@ for(jj in 1:nrow(mix.results.all)){
   if (mix.results.all$m4id_mix[jj] %in% mix.info.tc$m4id_mix){
     m4id_1 <- mix.info.tc[which(mix.info.tc$m4id_mix == mix.results.all$m4id_mix[jj]),]$m4id_1
     m4id_2 <- mix.info.tc[which(mix.info.tc$m4id_mix == mix.results.all$m4id_mix[jj]),]$m4id_2
-    if ((mc5_attg_endpts[m4id == m4id_1,]$hitc >= 0.9) & (mc5_attg_endpts[m4id == m4id_2,]$hitc < 0.9)){
+    if ((mc5[m4id == m4id_1,]$hitc >= 0.9) & (mc5[m4id == m4id_2,]$hitc < 0.9)){
       potent_sing <- mc5_attg_endpts[m4id == m4id_1,]
-    } else if ((mc5_attg_endpts[m4id == m4id_1,]$hitc < 0.9) & (mc5_attg_endpts[m4id == m4id_2,]$hitc >= 0.9)){
+    } else if ((mc5[m4id == m4id_1,]$hitc < 0.9) & (mc5[m4id == m4id_2,]$hitc >= 0.9)){
       potent_sing <- mc5_attg_endpts[m4id == m4id_2,]
-    } else if ((mc5_attg_endpts[m4id == m4id_1,]$hitc >= 0.9) & (mc5_attg_endpts[m4id == m4id_2,]$hitc >= 0.9)){
+    } else if ((mc5[m4id == m4id_1,]$hitc >= 0.9) & (mc5[m4id == m4id_2,]$hitc >= 0.9)){
       single_chems <- subset(mc5_attg_endpts,m4id %in% c(m4id_1,m4id_2))
       potent_sing <- single_chems[which.min(single_chems$acc),]
     }
@@ -1064,11 +1001,12 @@ for (ii in 1:nrow(mix.results.all)){
     mix.results.acc$acc_bayes_single[ii] <- NA
   } else {
     single_info <- single.info[single.info$m4id==mix.results.all$potent_sing_id[ii],]
-    single_dat <- mc5_attg_endpts[m4id==single_info$m4id]
+    single_dat <- mc5[m4id==single_info$m4id]
     x_vals <- 10^seq(log10(0.01*single_dat$conc_min),log10(3*single_dat$conc_max),length.out=len_XX)
     # bootstrap interval
     single_curve <- sapply(c(1:nrow(single_info$bootparams[[1]])), toxcast_model,
-                      dat=single_dat,params=single_info$bootparams[[1]],XX=x_vals,sample=TRUE)
+                      dat=single_dat,params=single_info$bootparams[[1]],
+                      XX=x_vals,sample=TRUE)
     single_bootint <- apply(single_curve, 1, quantile, prob=c(0.025,0.975), na.rm=TRUE)
     mix.results.all$single_bootint[ii] <- list(data.frame(conc=x_vals,t(single_bootint)))
     acc <- rep(NA,nrow(single_info$bootparams[[1]]))
@@ -1081,11 +1019,13 @@ for (ii in 1:nrow(mix.results.all)){
       } else {
         if (top_val<single_dat$coff){
           if (single_dat$modl %in% c("poly1","pow","exp2","exp3")){
-            acc[ss] <- single_curve_inv(y=single_dat$coff,params=params,single_dat=single_dat)
+            acc[ss] <- single_curve_inv(y=single_dat$coff,params=params,
+                                        single_dat=single_dat)
           } else if(single_dat$modl=='poly2'){
             # all poly2 curves can extend except for the concave down increasing
             if (!(params$a<0 & params$b<0)){
-              acc[ss] <- single_curve_inv(y=single_dat$coff,params=params,single_dat=single_dat)
+              acc[ss] <- single_curve_inv(y=single_dat$coff,
+                                          params=params,single_dat=single_dat)
             } else{
               acc[ss] <- 10000
             }
@@ -1104,8 +1044,10 @@ for (ii in 1:nrow(mix.results.all)){
     # Bayesian credible interval
     indices <- sample(1:10000, num_sample, replace=F)
     single_curve_bayes <- sapply(indices, toxcast_model,
-                      dat=single_dat,params=single_info$bayesparams[[1]],XX=x_vals,sample=TRUE)
-    single_bayesint <- apply(single_curve_bayes, 1, quantile, prob=c(0.025,0.975), na.rm=TRUE)
+                      dat=single_dat,params=single_info$bayesparams[[1]],
+                      XX=x_vals,sample=TRUE)
+    single_bayesint <- apply(single_curve_bayes, 1, quantile,
+                             prob=c(0.025,0.975), na.rm=TRUE)
     mix.results.all$single_bayesint[ii] <- list(data.frame(conc=x_vals,t(single_bayesint)))
     acc_bayes <- rep(NA,num_sample)
     for (ss in 1:num_sample){
@@ -1150,11 +1092,13 @@ for (ii in 1:nrow(mix.results.all)){
     mix.results.acc$acc_bayes_single.tc[ii] <- NA
   } else {
     single_info <- single.info.tc[single.info.tc$m4id==mix.results.all$potent_sing_id.tc[ii],]
-    single_dat <- mc5_attg_endpts[m4id==single_info$m4id]
-    x_vals <- 10^seq(log10(0.01*single_dat$conc_min),log10(3*single_dat$conc_max),length.out=len_XX)
+    single_dat <- mc5[m4id==single_info$m4id]
+    x_vals <- 10^seq(log10(0.01*single_dat$conc_min),
+                     log10(3*single_dat$conc_max),length.out=len_XX)
     # bootstrap interval
     single_curve <- sapply(c(1:nrow(single_info$bootparams[[1]])), toxcast_model,
-                      dat=single_dat,params=single_info$bootparams[[1]],XX=x_vals,sample=TRUE)
+                      dat=single_dat,params=single_info$bootparams[[1]],
+                      XX=x_vals,sample=TRUE)
     single_bootint <- apply(single_curve, 1, quantile, prob=c(0.025,0.975), na.rm=TRUE)
     mix.results.all$single_bootint.tc[ii] <- list(data.frame(conc=x_vals,t(single_bootint)))
     acc <- rep(NA,nrow(single_info$bootparams[[1]]))
@@ -1167,11 +1111,13 @@ for (ii in 1:nrow(mix.results.all)){
       } else {
         if (top_val<single_dat$coff){
           if (single_dat$modl %in% c("poly1","pow","exp2","exp3")){
-            acc[ss] <- single_curve_inv(y=single_dat$coff,params=params,single_dat=single_dat)
+            acc[ss] <- single_curve_inv(y=single_dat$coff,params=params,
+                                        single_dat=single_dat)
           } else if(single_dat$modl=='poly2'){
             # all poly2 curves can extend except for the concave down increasing
             if (!(params$a<0 & params$b<0)){
-              acc[ss] <- single_curve_inv(y=single_dat$coff,params=params,single_dat=single_dat)
+              acc[ss] <- single_curve_inv(y=single_dat$coff,params=params,
+                                          single_dat=single_dat)
             } else{
               acc[ss] <- 10000
             }
@@ -1191,8 +1137,10 @@ for (ii in 1:nrow(mix.results.all)){
     # Bayesian credible interval
     indices <- sample(1:10000, num_sample, replace=F)
     single_curve_bayes <- sapply(indices, toxcast_model,
-                      dat=single_dat,params=single_info$bayesparams[[1]],XX=x_vals,sample=TRUE)
-    single_bayesint <- apply(single_curve_bayes, 1, quantile, prob=c(0.025,0.975), na.rm=TRUE)
+                      dat=single_dat,params=single_info$bayesparams[[1]],
+                      XX=x_vals,sample=TRUE)
+    single_bayesint <- apply(single_curve_bayes, 1, quantile,
+                             prob=c(0.025,0.975), na.rm=TRUE)
     mix.results.all$single_bayesint.tc[ii] <- list(data.frame(conc=x_vals,t(single_bayesint)))
     
     acc_bayes <- rep(NA,num_sample)
@@ -1205,11 +1153,13 @@ for (ii in 1:nrow(mix.results.all)){
       } else {
         if (top_val<single_dat$coff){
           if (single_dat$modl %in% c("poly1","pow","exp2","exp3")){
-            acc_bayes[ss] <- single_curve_inv(y=single_dat$coff,params=params,single_dat=single_dat)
+            acc_bayes[ss] <- single_curve_inv(y=single_dat$coff,params=params,
+                                              single_dat=single_dat)
           } else if(single_dat$modl=='poly2'){
             # all poly2 curves can extend except for the concave down increasing
             if (!(params$a<0 & params$b<0)){
-              acc_bayes[ss] <- single_curve_inv(y=single_dat$coff,params=params,single_dat=single_dat)
+              acc_bayes[ss] <- single_curve_inv(y=single_dat$coff,params=params,
+                                                single_dat=single_dat)
             } else{
               acc_bayes[ss] <- 10000
             }
@@ -1219,7 +1169,8 @@ for (ii in 1:nrow(mix.results.all)){
         } else if (min_val>single_dat$coff){
           acc_bayes[ss] <- -10000
         } else{
-          acc_bayes[ss] <- single_curve_inv(y=single_dat$coff,params=params,single_dat=single_dat)
+          acc_bayes[ss] <- single_curve_inv(y=single_dat$coff,params=params,
+                                            single_dat=single_dat)
     
         }
       }
@@ -1238,7 +1189,7 @@ for (ii in 1:nrow(mix.results.acc)){
     mix.results.acc$acc_pred_single[ii] <- NA
   } else {
     single_info <- single.info[single.info$m4id==mix.results.all$potent_sing_id[ii],]
-    single_dat <- mc5_attg_endpts[m4id==single_info$m4id]
+    single_dat <- mc5[m4id==single_info$m4id]
     indices <- sample(1:10000, num_sample, replace=F)
     acc_pred <- rep(NA,num_sample)
     for (ss in 1:num_sample){
@@ -1251,11 +1202,13 @@ for (ii in 1:nrow(mix.results.acc)){
       } else {
         if (top_val<y_err_samp){
           if (single_dat$modl %in% c("poly1","pow","exp2","exp3")){
-            acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,single_dat=single_dat)
+            acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,
+                                             single_dat=single_dat)
           } else if(single_dat$modl=='poly2'){
             # all poly2 curves can extend except for the concave down increasing
             if (!(params$a<0 & params$b<0)){
-              acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,single_dat=single_dat)
+              acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,
+                                               single_dat=single_dat)
             } else{
               acc_pred[ss] <- 10000
             }
@@ -1265,7 +1218,8 @@ for (ii in 1:nrow(mix.results.acc)){
         } else if (min_val>y_err_samp){
           acc_pred[ss] <- -10000
         } else{
-          acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,single_dat=single_dat)
+          acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,
+                                           single_dat=single_dat)
         }
       }
     }
@@ -1279,7 +1233,7 @@ for (ii in 1:nrow(mix.results.acc)){
     mix.results.acc$acc_pred_single.tc[ii] <- NA
   } else {
     single_info <- single.info.tc[single.info.tc$m4id==mix.results.all$potent_sing_id.tc[ii],]
-    single_dat <- mc5_attg_endpts[m4id==single_info$m4id]
+    single_dat <- mc5[m4id==single_info$m4id]
     # Bayesian credible interval
     indices <- sample(1:10000, num_sample, replace=F)
     acc_pred <- rep(NA,num_sample)
@@ -1293,7 +1247,8 @@ for (ii in 1:nrow(mix.results.acc)){
       } else {
         if (top_val<y_err_samp){
           if (single_dat$modl %in% c("poly1","pow","exp2","exp3")){
-            acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,single_dat=single_dat)
+            acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,
+                                             single_dat=single_dat)
           } else if(single_dat$modl=='poly2'){
             # all poly2 curves can extend except for the concave down increasing
             if (!(params$a<0 & params$b<0)){
@@ -1307,7 +1262,8 @@ for (ii in 1:nrow(mix.results.acc)){
         } else if (min_val>y_err_samp){
           acc_pred[ss] <- -10000
         } else{
-          acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,single_dat=single_dat)
+          acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,
+                                           single_dat=single_dat)
         }
       }
     }
@@ -1414,12 +1370,25 @@ for (ii in 1:nrow(mix.results.all)){
 
 # Save all results
 ```{r}
-# save(mix.info,file="./output/mix_info.Rdata")
-# save(mix.info.tc,file="./output/mix_info_tc.Rdata")
-# save(single.info,file="./output/single_info.Rdata")
-# save(single.info.tc,file="./output/single_info_tc.Rdata")
-# save(mix.results.acc,file="./output/mix_results_acc.Rdata")
-# save(mix.results.all,file="mix_results_all.Rdata")
+save(mix.info,file="./output/mix_info.Rdata")
+save(mix.info.tc,file="./output/mix_info_tc.Rdata")
+save(single.info,file="./output/single_info.Rdata")
+save(single.info.tc,file="./output/single_info_tc.Rdata")
+save(mix.results.acc,file="./output/mix_results_acc.Rdata")
+save(mix.results.all,file="./output/mix_results_all.Rdata")
+save(poly2_new_modl,file="./output/poly2_new_modl.Rdata")
+save(m4ids_all,file="./input/m4ids_all.Rdata")
+save(spids,file="./input/mixture_spids.Rdata")
+save(spids_tc,file="./input/legacy_spids.Rdata")
+
+# load(file="./output/mix_info.Rdata")
+# load(file="./output/mix_info_tc.Rdata")
+# load(file="./output/single_info.Rdata")
+# load(file="./output/single_info_tc.Rdata")
+# load(file="./output/mix_results_acc.Rdata")
+# load(file="./output/mix_results_all.Rdata")
+# load(file="./output/poly2_new_modl.Rdata")
+
 
 ```
 

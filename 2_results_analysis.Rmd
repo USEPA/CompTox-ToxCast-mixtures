@@ -34,30 +34,19 @@ source("./scripts/mixture_model_functions.R")
 
 ## Load data from test dataset
 ```{r}
-#Pull mixtures data based on spids of experiment "EPA-68HE0B21P0625"
-# mc0 <- tcplPrepOtpt(tcplLoadData(lvl = 0 , fld = "acid", val = c(32:92, 94:113))) #pull level 0 (raw data)for all atg endpoints
-# new.mc0 <- mc0[grep("EPA-68HE0B21P0625", mc0$srcf),] #filter for task order # within source file name colunn
-# 
-# # select only "test" chemicals and not "reference" by removing dsstox_substance_id = NA
-# mc0.filter <- new.mc0[!is.na(dsstox_substance_id)]
-# 
-# spids <- unique(mc0.filter$spid)
+# load spids and m4ids of mixtures, test single components, and legacy single components
+# saved from '1_mixtures_analysis.Rmd'
 
-# have spid values for mixture experiment pre-saved
+## have m4id values for test, legacy, and mixtures information presaved
+# m4ids_all
+load("./input/m4ids_all.Rdata")
+## have spid values for mixtures experiment pre-saved
+# spids
 load("./input/mixture_spids.Rdata")
-
-# Load test dataset from this experiment
-mc3 <- tcplPrepOtpt(tcplLoadData(lvl=3, type='mc', fld='spid', val=spids))
-mc4 <- tcplPrepOtpt(tcplLoadData(lvl=4,type='mc', fld='spid', val=spids))
-mc5 <- tcplPrepOtpt(tcplLoadData(lvl=5,type='mc', fld='spid', val=spids))
-mc4_agg <- tcplPrepOtpt(tcplLoadData(lvl="agg",type='mc', fld='spid', val=spids))
-# add flags
-mc6 <- tcplPrepOtpt(tcplLoadData(lvl=6, fld='spid', val=spids, type='mc'))
-setDT(mc6)
-mc6_mthds <- mc6[ , .( mc6_mthd_id = paste(mc6_mthd_id, collapse=",")), by = m4id]
-mc6_flags <- mc6[ , .( flag = paste(flag, collapse=";")), by = m4id]
-mc5$mc6_flags <- mc6_mthds$mc6_mthd_id[match(mc5$m4id, mc6_mthds$m4id)]
-mc5[, flag.length := ifelse(!is.na(mc6_flags), count.fields(textConnection(mc6_flags), sep =','), NA)]
+## have spid values for legacy single component subset presaved
+# spids_tc
+load("./input/legacy_spids.Rdata")
+# mc5 <- tcplPrepOtpt(tcplLoadData(lvl=5,type='mc', fld='spid', val=spids))
 
 # Map mixtures to single chemical components
 # 11 single chemicals (plus unused Retinoic acid) over 81 endpoints (aeid=63-144)
@@ -66,35 +55,34 @@ ES219_key <- read_excel("./input/ATG_mixtures_upload.xlsx",  sheet = "ES219_key"
 mixtures_uploads <- read_excel("./input/ATG_mixtures_upload.xlsx",  sheet = "Mixtures_upload")
 mixtures_key <- merge(ES219_key, mixtures_uploads, by.x="BOTTLE_ID", by.y="Barcode_mixture")
 
-# separate single chemicals and mixtures by DTXSID
-mc5.single <- mc5 %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.y)
+# # Load all mc5 level data for Attagene endpoints
+# # for finding maximum endpoint 'top' response over all of Attagene by endpoint to use for normalization
+# mc5_attg_endpts <- tcplPrepOtpt(tcplLoadData(lvl=5, type = 'mc', fld='aeid',val=c(63:144)))
+
+# load all mc3, mc4, mc5, and mc6 level data for test single components, legacy single components, and tested mixtures
+mc4 <- tcplPrepOtpt(tcplLoadData(lvl=4, type = 'mc', fld='m4id',val=m4ids_all))
+mc4_agg <- tcplPrepOtpt(tcplLoadData(lvl="agg", type = 'mc', fld='m4id',val=m4ids_all))
+mc5 <- tcplPrepOtpt(tcplLoadData(lvl=5, type = 'mc', fld='m4id',val=m4ids_all))
+mc3 <- tcplPrepOtpt(tcplLoadData(lvl=3, type = 'mc', fld='m3id',val=unique(mc4_agg$m3id)))
+# add flags
+mc6 <- tcplPrepOtpt(tcplLoadData(lvl=6, fld='m4id', val=m4ids_all, type='mc'))
+setDT(mc6)
+mc6_mthds <- mc6[ , .( mc6_mthd_id = paste(mc6_mthd_id, collapse=",")), by = m4id]
+mc6_flags <- mc6[ , .( flag = paste(flag, collapse=";")), by = m4id]
+mc5$mc6_flags <- mc6_mthds$mc6_mthd_id[match(mc5$m4id, mc6_mthds$m4id)]
+mc5[, flag.length := ifelse(!is.na(mc6_flags), count.fields(textConnection(mc6_flags), sep =','), NA)]
+
+# test dataset single components
+mc5.test <- mc5 %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.y & (spid %in% spids))
+# legacy dataset single components
+mc5.legacy <- mc5 %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.y & (spid %in% spids_tc))
+# tested mixtures data
 mc5.mixture <- mc5 %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.x)
-
-# filter for active mixtures with hitc >= 0.9 and non-negative (curve goes from zero to positive max only for now)
-mc5.mixture.filter <- mc5.mixture %>% filter(hitc >= 0.9 & top>=0)
-
-# Load all mc5 level data for Attagene endpoints
-# for finding maximum endpoint 'top' response over all of Attagene by endpoint to use for normalization
-mc5_attg_endpts <- tcplPrepOtpt(tcplLoadData(lvl=5, type = 'mc', fld='aeid',val=c(63:144)))
+# # filter for active mixtures with hitc >= 0.9 and non-negative (curve goes from zero to positive max only)
+# mc5.mixture.filter <- mc5.mixture %>% filter(hitc >= 0.9 & top>=0)
 
 ```
 
-## Select and load single component data from legacy ToxCast database
-Same component chemicals, but from legacy ToxCast (and same test mixtures)
-```{r}
-# load saved selected spids instead of running each time
-load("./input/mixture_spids_tc.Rdata")
-
-# Load other mc levels for the subset of toxcast nonmixture data
-mc3_tcsubset <- tcplPrepOtpt(tcplLoadData(lvl=3, type = 'mc', fld='spid',val=spids_tc))
-mc4_tcsubset <- tcplPrepOtpt(tcplLoadData(lvl=4, type = 'mc', fld='spid',val=spids_tc))
-mc4_agg_tcsubset <- tcplPrepOtpt(tcplLoadData(lvl="agg", type = 'mc', fld='spid',val=spids_tc))
-
-# select data from legacy ToxCast for plotting (even those not analyzed with models)
-tc_mc5_notmix <- mc5_attg_endpts %>% filter(!(spid %in% spids))
-setDT(tc_mc5_notmix)
-tc_mc5_notmix_filter <- tcplSubsetChid(tc_mc5_notmix)
-```
 
 ## Load dataframes of stored results
 Mixtures information, single component information, and model results are calculated in the mixtures_analysis.Rmd file
@@ -113,25 +101,32 @@ load("./output/mix_results_acc.Rdata")
 load("./output/mix_results_all.Rdata")
 
 # load alternate models for poly2 curves that have responses <0  and a positive top response 
-# load("./input/poly2_new_modl.Rdata")
+# load("./output/poly2_new_modl.Rdata")
 
 ```
 
 ## Filter and sort active versus inactive components and mixtures
 ```{r}
 # Test dataset
-mc5_mix_all <- mc5 %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.x)
-mc5_sing <- mc5 %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.y)
-# mc5_sing_tc <- tc_mc5_notmix_filter %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.y)
+mc5_mix_all <- mc5.mixture
+mc5_sing <- mc5.test
 
 # sort mixtures by active and inactive single components
 for (qq in 1:nrow(mc5_mix_all)){
   # relate mixture to single components and identify by m4id
   dtxsids <- mixtures_key[mixtures_key$DTXSID.x == mc5_mix_all$dsstox_substance_id[qq], ]$DTXSID.y
-  mc5_mix_all$m4id_1[qq] <- mc5[(dsstox_substance_id==dtxsids[1] & aeid == mc5_mix_all$aeid[qq]),]$m4id
-  mc5_mix_all$m4id_2[qq] <- mc5[(dsstox_substance_id==dtxsids[2] & aeid == mc5_mix_all$aeid[qq]),]$m4id
-  mc5_mix_all$fitc_1[qq] <- mc5[(dsstox_substance_id==dtxsids[1] & aeid == mc5_mix_all$aeid[qq]),]$fitc
-  mc5_mix_all$fitc_2[qq] <- mc5[(dsstox_substance_id==dtxsids[2] & aeid == mc5_mix_all$aeid[qq]),]$fitc
+  mc5_mix_all$m4id_1[qq] <- mc5[(dsstox_substance_id==dtxsids[1]
+                                 & aeid == mc5_mix_all$aeid[qq]
+                                 & spid %in% spids),]$m4id
+  mc5_mix_all$m4id_2[qq] <- mc5[(dsstox_substance_id==dtxsids[2]
+                                 & aeid == mc5_mix_all$aeid[qq]
+                                 & spid %in% spids),]$m4id
+  mc5_mix_all$fitc_1[qq] <- mc5[(dsstox_substance_id==dtxsids[1]
+                                 & aeid == mc5_mix_all$aeid[qq]
+                                 & spid %in% spids),]$fitc
+  mc5_mix_all$fitc_2[qq] <- mc5[(dsstox_substance_id==dtxsids[2]
+                                 & aeid == mc5_mix_all$aeid[qq]
+                                 & spid %in% spids),]$fitc
 }
 
 # remove active chemicals with negative dominant response
@@ -167,17 +162,25 @@ mix_inact_single_act.border <- mix_inact_single_act %>% filter((fitc==15)|
                                                                  (fitc_2 %in% c(36,37,38)))
 
 # Repeat with ToxCast chemical library
-mc5_mix_all <- mc5 %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.x)
-mc5_sing_tc <- tc_mc5_notmix_filter %>% filter((dsstox_substance_id %in% mixtures_key$DTXSID.y) & (aeid %in% mc5_mix_all$aeid))
+mc5_mix_all <- mc5.mixture
+mc5_sing_tc <- mc5.legacy
 
 # sort mixtures by active and inactive single components
 for (qq in 1:nrow(mc5_mix_all)){
   # relate mixture to single components and identify by m4id
   dtxsids <- mixtures_key[mixtures_key$DTXSID.x == mc5_mix_all$dsstox_substance_id[qq], ]$DTXSID.y
-  mc5_mix_all$m4id_1[qq] <- mc5_sing_tc[(dsstox_substance_id==dtxsids[1] & aeid == mc5_mix_all$aeid[qq]),]$m4id
-  mc5_mix_all$m4id_2[qq] <- mc5_sing_tc[(dsstox_substance_id==dtxsids[2] & aeid == mc5_mix_all$aeid[qq]),]$m4id
-  mc5_mix_all$fitc_1[qq] <- mc5_sing_tc[(dsstox_substance_id==dtxsids[1] & aeid == mc5_mix_all$aeid[qq]),]$fitc
-  mc5_mix_all$fitc_2[qq] <- mc5_sing_tc[(dsstox_substance_id==dtxsids[2] & aeid == mc5_mix_all$aeid[qq]),]$fitc
+  mc5_mix_all$m4id_1[qq] <- mc5_sing_tc[(dsstox_substance_id==dtxsids[1]
+                                         & aeid == mc5_mix_all$aeid[qq]
+                                         & spid %in% spids_tc),]$m4id
+  mc5_mix_all$m4id_2[qq] <- mc5_sing_tc[(dsstox_substance_id==dtxsids[2]
+                                         & aeid == mc5_mix_all$aeid[qq]
+                                         & spid %in% spids_tc),]$m4id
+  mc5_mix_all$fitc_1[qq] <- mc5_sing_tc[(dsstox_substance_id==dtxsids[1]
+                                         & aeid == mc5_mix_all$aeid[qq]
+                                         & spid %in% spids_tc),]$fitc
+  mc5_mix_all$fitc_2[qq] <- mc5_sing_tc[(dsstox_substance_id==dtxsids[2]
+                                         & aeid == mc5_mix_all$aeid[qq]
+                                         & spid %in% spids_tc),]$fitc
 }
 
 # remove active chemicals with negative dominant response
@@ -227,8 +230,8 @@ sing_exinact_tcact.border <-  sing_exinact_tcact %>% filter((fitc.ex==15)|(fitc.
 
 ## Evaluate fit quality for ACC values
 ```{r}
-mix.results.acc$acc_single <- mc5_attg_endpts$acc[match(mix.results.all$potent_sing_id,mc5_attg_endpts$m4id)]
-mix.results.acc$acc_single.tc <- mc5_attg_endpts$acc[match(mix.results.all$potent_sing_id.tc,mc5_attg_endpts$m4id)]
+mix.results.acc$acc_single <- mc5$acc[match(mix.results.all$potent_sing_id,mc5$m4id)]
+mix.results.acc$acc_single.tc <- mc5$acc[match(mix.results.all$potent_sing_id.tc,mc5$m4id)]
 fit_quality <- data.frame(m4id_mix=mix.results.all$m4id_mix)
 
 # ACC differences
@@ -240,128 +243,293 @@ fit_quality$diff_acc_ca.tc <- log10(mix.results.acc$acc_mix)-log10(mix.results.a
 fit_quality$diff_acc_ia.tc <- log10(mix.results.acc$acc_mix)-log10(mix.results.acc$acc_ia.tc)
 fit_quality$diff_acc_single.tc <- log10(mix.results.acc$acc_mix)-log10(mix.results.acc$acc_single.tc)
 
-# bootstrap of ACC differences
-for (ii in 1:nrow(mix.results.acc)){
-  if (!(fit_quality$m4id_mix[ii] %in% mix.info$m4id_mix)){
-    fit_quality$diff_acc_boot_ca[ii] <- NA
-    fit_quality$diff_acc_boot_ia[ii] <- NA
-    fit_quality$diff_acc_boot_single[ii] <- NA
-    fit_quality$diff_acc_bayes_ca[ii] <- NA
-    fit_quality$diff_acc_bayes_ia[ii] <- NA
-    fit_quality$diff_acc_bayes_single[ii] <- NA
-  } else {
-    fit_quality$diff_acc_boot_ca[ii] <- list(mix.results.acc$acc_boot_mix[[ii]]/
-                                               sample(mix.results.acc$acc_boot_ca[[ii]]))
-    fit_quality$diff_acc_boot_ia[ii] <- list(mix.results.acc$acc_boot_mix[[ii]]/
-                                               sample(mix.results.acc$acc_boot_ia[[ii]]))
-    fit_quality$diff_acc_boot_single[ii] <- list(mix.results.acc$acc_boot_mix[[ii]]/
-                                               sample(mix.results.acc$acc_boot_single[[ii]]))
-    fit_quality$diff_acc_bayes_ca[ii] <- list(mix.results.acc$acc_bayes_mix[[ii]]/
-                                               sample(mix.results.acc$acc_bayes_ca[[ii]]))
-    fit_quality$diff_acc_bayes_ia[ii] <- list(mix.results.acc$acc_bayes_mix[[ii]]/
-                                               sample(mix.results.acc$acc_bayes_ia[[ii]]))
-    fit_quality$diff_acc_bayes_single[ii] <- list(mix.results.acc$acc_bayes_mix[[ii]]/
-                                               sample(mix.results.acc$acc_bayes_single[[ii]]))
-  }
-  # repeat for TC library
-  if (!(fit_quality$m4id_mix[ii] %in% mix.info.tc$m4id_mix)){
-    fit_quality$diff_acc_boot_ca.tc[ii] <- NA
-    fit_quality$diff_acc_boot_ia.tc[ii] <- NA
-    fit_quality$diff_acc_boot_single.tc[ii] <- NA
-    fit_quality$diff_acc_bayes_ca.tc[ii] <- NA
-    fit_quality$diff_acc_bayes_ia.tc[ii] <- NA
-    fit_quality$diff_acc_bayes_single.tc[ii] <- NA
-  } else {
-    fit_quality$diff_acc_boot_ca.tc[ii] <- list(mix.results.acc$acc_boot_mix[[ii]]/
-                                               sample(mix.results.acc$acc_boot_ca.tc[[ii]]))
-    fit_quality$diff_acc_boot_ia.tc[ii] <- list(mix.results.acc$acc_boot_mix[[ii]]/
-                                               sample(mix.results.acc$acc_boot_ia.tc[[ii]]))
-    fit_quality$diff_acc_boot_single.tc[ii] <- list(mix.results.acc$acc_boot_mix[[ii]]/
-                                               sample(mix.results.acc$acc_boot_single.tc[[ii]]))
-    fit_quality$diff_acc_bayes_ca.tc[ii] <- list(mix.results.acc$acc_bayes_mix[[ii]]/
-                                               sample(mix.results.acc$acc_bayes_ca.tc[[ii]]))
-    fit_quality$diff_acc_bayes_ia.tc[ii] <- list(mix.results.acc$acc_bayes_mix[[ii]]/
-                                               sample(mix.results.acc$acc_bayes_ia.tc[[ii]]))
-    fit_quality$diff_acc_bayes_single.tc[ii] <- list(mix.results.acc$acc_bayes_mix[[ii]]/
-                                               sample(mix.results.acc$acc_bayes_single.tc[[ii]]))
-  }
+# evaluate boostrapped ACC 95% confidence intervals 
+# and test for overlap between the modeled and observed intervals (accurate)
+acc_boot_lo_bounds <- data.frame(lo.mix=sapply(mix.results.acc$acc_boot_mix,
+                                               accint_quantiles)[1,],
+                                 lo.ca=sapply(mix.results.acc$acc_boot_ca,
+                                              accint_quantiles)[1,],
+                                 lo.ia=sapply(mix.results.acc$acc_boot_ia,
+                                              accint_quantiles)[1,],
+                                 lo.single=sapply(mix.results.acc$acc_boot_single,
+                                                  accint_quantiles)[1,],
+                                 lo.ca.tc=sapply(mix.results.acc$acc_boot_ca.tc,
+                                                 accint_quantiles)[1,],
+                                 lo.ia.tc=sapply(mix.results.acc$acc_boot_ia.tc,
+                                                 accint_quantiles)[1,],
+                                 lo.single.tc=sapply(mix.results.acc$acc_boot_single.tc,
+                                                     accint_quantiles)[1,])
 
-}
+acc_boot_hi_bounds <- data.frame(hi.mix=sapply(mix.results.acc$acc_boot_mix,
+                                               accint_quantiles)[2,],
+                                 hi.ca=sapply(mix.results.acc$acc_boot_ca,
+                                              accint_quantiles)[2,],
+                                 hi.ia=sapply(mix.results.acc$acc_boot_ia,
+                                              accint_quantiles)[2,],
+                                 hi.single=sapply(mix.results.acc$acc_boot_single,
+                                                  accint_quantiles)[2,],
+                                 hi.ca.tc=sapply(mix.results.acc$acc_boot_ca.tc,
+                                                 accint_quantiles)[2,],
+                                 hi.ia.tc=sapply(mix.results.acc$acc_boot_ia.tc,
+                                                 accint_quantiles)[2,],
+                                 hi.single.tc=sapply(mix.results.acc$acc_boot_single.tc,
+                                                     accint_quantiles)[2,])
 
+acc_boot_bounds <- cbind(acc_boot_lo_bounds,acc_boot_hi_bounds)
 
+acc_boot_bounds <- acc_boot_bounds %>% mutate(
+                   ca_overlap = case_when(
+                     ((lo.mix <= lo.ca & hi.mix >= lo.ca)|
+                     (lo.mix <= hi.ca & hi.mix >= hi.ca)|
+                     (lo.ca <= lo.mix & hi.ca >= lo.mix)|
+                     (lo.ca <= hi.mix & hi.ca >= hi.mix)) ~ "1",
+                     is.na(lo.ca) ~ NA_character_,
+                     TRUE ~ "0"),
+                   ia_overlap = case_when(
+                     ((lo.mix <= lo.ia & hi.mix >= lo.ia)|
+                     (lo.mix <= hi.ia & hi.mix >= hi.ia)|
+                     (lo.ia <= lo.mix & hi.ia >= lo.mix)|
+                     (lo.ia <= hi.mix & hi.ia >= hi.mix)) ~ "1",
+                     is.na(lo.ia) ~ NA_character_,
+                     TRUE ~ "0"),
+                   single_overlap = case_when(
+                     ((lo.mix <= lo.single & hi.mix >= lo.single)|
+                     (lo.mix <= hi.single & hi.mix >= hi.single)|
+                     (lo.single <= lo.mix & hi.single >= lo.mix)|
+                     (lo.single <= hi.mix & hi.single >= hi.mix)) ~ "1",
+                     is.na(lo.single) ~ NA_character_,
+                     TRUE ~ "0"),
+                   ca_overlap.tc = case_when(
+                     ((lo.mix <= lo.ca.tc & hi.mix >= lo.ca.tc)|
+                     (lo.mix <= hi.ca.tc & hi.mix >= hi.ca.tc)|
+                     (lo.ca.tc <= lo.mix & hi.ca.tc >= lo.mix)|
+                     (lo.ca.tc <= hi.mix & hi.ca.tc >= hi.mix)) ~ "1",
+                     is.na(lo.ca.tc) ~ NA_character_,
+                     TRUE ~ "0"),
+                   ia_overlap.tc = case_when(
+                     ((lo.mix <= lo.ia.tc & hi.mix >= lo.ia.tc)|
+                     (lo.mix <= hi.ia.tc & hi.mix >= hi.ia.tc)|
+                     (lo.ia.tc <= lo.mix & hi.ia.tc >= lo.mix)|
+                     (lo.ia.tc <= hi.mix & hi.ia.tc >= hi.mix)) ~ "1",
+                     is.na(lo.ia.tc) ~ NA_character_,
+                     TRUE ~ "0"),
+                   single_overlap.tc = case_when(
+                     ((lo.mix <= lo.single.tc & hi.mix >= lo.single.tc)|
+                     (lo.mix <= hi.single.tc & hi.mix >= hi.single.tc)|
+                     (lo.single.tc <= lo.mix & hi.single.tc >= lo.mix)|
+                     (lo.single.tc <= hi.mix & hi.single.tc >= hi.mix)) ~ "1",
+                     is.na(lo.single.tc) ~ NA_character_,
+                     TRUE ~ "0")
+                       )
 
-boot_ca_conserv <- calc_int_metric(results=fit_quality$diff_acc_boot_ca,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_boot_ca))
-boot_ia_conserv <- calc_int_metric(results=fit_quality$diff_acc_boot_ia,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_boot_ia))
-boot_single_conserv <- calc_int_metric(results=fit_quality$diff_acc_boot_single,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_boot_single))
+# evaluate Bayesian ACC 95% credible intervals 
+# and test for overlap between the modeled and observed intervals (accurate)
+acc_bayes_lo_bounds <- data.frame(lo.mix=sapply(mix.results.acc$acc_bayes_mix,
+                                                accint_quantiles)[1,],
+                                 lo.ca=sapply(mix.results.acc$acc_bayes_ca,
+                                              accint_quantiles)[1,],
+                                 lo.ia=sapply(mix.results.acc$acc_bayes_ia,
+                                              accint_quantiles)[1,],
+                                 lo.single=sapply(mix.results.acc$acc_bayes_single,
+                                                  accint_quantiles)[1,],
+                                 lo.ca.tc=sapply(mix.results.acc$acc_bayes_ca.tc,
+                                                 accint_quantiles)[1,],
+                                 lo.ia.tc=sapply(mix.results.acc$acc_bayes_ia.tc,
+                                                 accint_quantiles)[1,],
+                                 lo.single.tc=sapply(mix.results.acc$acc_bayes_single.tc,
+                                                     accint_quantiles)[1,])
 
-boot_ca_accur <- calc_int_metric(results=fit_quality$diff_acc_boot_ca,conserv=F)/sum(!is.na(fit_quality$diff_acc_boot_ca))
-boot_ia_accur <- calc_int_metric(results=fit_quality$diff_acc_boot_ia,conserv=F)/sum(!is.na(fit_quality$diff_acc_boot_ia))
-boot_single_accur <- calc_int_metric(results=fit_quality$diff_acc_boot_single,conserv=F)/sum(!is.na(fit_quality$diff_acc_boot_single))
+acc_bayes_hi_bounds <- data.frame(hi.mix=sapply(mix.results.acc$acc_bayes_mix,
+                                                accint_quantiles)[2,],
+                                 hi.ca=sapply(mix.results.acc$acc_bayes_ca,
+                                              accint_quantiles)[2,],
+                                 hi.ia=sapply(mix.results.acc$acc_bayes_ia,
+                                              accint_quantiles)[2,],
+                                 hi.single=sapply(mix.results.acc$acc_bayes_single,
+                                                  accint_quantiles)[2,],
+                                 hi.ca.tc=sapply(mix.results.acc$acc_bayes_ca.tc,
+                                                 accint_quantiles)[2,],
+                                 hi.ia.tc=sapply(mix.results.acc$acc_bayes_ia.tc,
+                                                 accint_quantiles)[2,],
+                                 hi.single.tc=sapply(mix.results.acc$acc_bayes_single.tc,
+                                                     accint_quantiles)[2,])
 
-bayes_ca_conserv <- calc_int_metric(results=fit_quality$diff_acc_bayes_ca,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_bayes_ca))
-bayes_ia_conserv <- calc_int_metric(results=fit_quality$diff_acc_bayes_ia,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_bayes_ia))
-bayes_single_conserv <- calc_int_metric(results=fit_quality$diff_acc_bayes_single,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_bayes_single))
+acc_bayes_bounds <- cbind(acc_bayes_lo_bounds,acc_bayes_hi_bounds)
 
-bayes_ca_accur <- calc_int_metric(results=fit_quality$diff_acc_bayes_ca,conserv=F)/sum(!is.na(fit_quality$diff_acc_bayes_ca))
-bayes_ia_accur <- calc_int_metric(results=fit_quality$diff_acc_bayes_ia,conserv=F)/sum(!is.na(fit_quality$diff_acc_bayes_ia))
-bayes_single_accur <- calc_int_metric(results=fit_quality$diff_acc_bayes_single,conserv=F)/sum(!is.na(fit_quality$diff_acc_bayes_single))
+acc_bayes_bounds <- acc_bayes_bounds %>% mutate(
+                   ca_overlap = case_when(
+                     ((lo.mix <= lo.ca & hi.mix >= lo.ca)|
+                     (lo.mix <= hi.ca & hi.mix >= hi.ca)|
+                     (lo.ca <= lo.mix & hi.ca >= lo.mix)|
+                     (lo.ca <= hi.mix & hi.ca >= hi.mix)) ~ "1",
+                     is.na(lo.ca) ~ NA_character_,
+                     TRUE ~ "0"),
+                   ia_overlap = case_when(
+                     ((lo.mix <= lo.ia & hi.mix >= lo.ia)|
+                     (lo.mix <= hi.ia & hi.mix >= hi.ia)|
+                     (lo.ia <= lo.mix & hi.ia >= lo.mix)|
+                     (lo.ia <= hi.mix & hi.ia >= hi.mix)) ~ "1",
+                     is.na(lo.ia) ~ NA_character_,
+                     TRUE ~ "0"),
+                   single_overlap = case_when(
+                     ((lo.mix <= lo.single & hi.mix >= lo.single)|
+                     (lo.mix <= hi.single & hi.mix >= hi.single)|
+                     (lo.single <= lo.mix & hi.single >= lo.mix)|
+                     (lo.single <= hi.mix & hi.single >= hi.mix)) ~ "1",
+                     is.na(lo.single) ~ NA_character_,
+                     TRUE ~ "0"),
+                   ca_overlap.tc = case_when(
+                     ((lo.mix <= lo.ca.tc & hi.mix >= lo.ca.tc)|
+                     (lo.mix <= hi.ca.tc & hi.mix >= hi.ca.tc)|
+                     (lo.ca.tc <= lo.mix & hi.ca.tc >= lo.mix)|
+                     (lo.ca.tc <= hi.mix & hi.ca.tc >= hi.mix)) ~ "1",
+                     is.na(lo.ca.tc) ~ NA_character_,
+                     TRUE ~ "0"),
+                   ia_overlap.tc = case_when(
+                     ((lo.mix <= lo.ia.tc & hi.mix >= lo.ia.tc)|
+                     (lo.mix <= hi.ia.tc & hi.mix >= hi.ia.tc)|
+                     (lo.ia.tc <= lo.mix & hi.ia.tc >= lo.mix)|
+                     (lo.ia.tc <= hi.mix & hi.ia.tc >= hi.mix)) ~ "1",
+                     is.na(lo.ia.tc) ~ NA_character_,
+                     TRUE ~ "0"),
+                   single_overlap.tc = case_when(
+                     ((lo.mix <= lo.single.tc & hi.mix >= lo.single.tc)|
+                     (lo.mix <= hi.single.tc & hi.mix >= hi.single.tc)|
+                     (lo.single.tc <= lo.mix & hi.single.tc >= lo.mix)|
+                     (lo.single.tc <= hi.mix & hi.single.tc >= hi.mix)) ~ "1",
+                     is.na(lo.single.tc) ~ NA_character_,
+                     TRUE ~ "0")
+                       )
 
-# repeat for TC library
-boot_ca_conserv.tc <- calc_int_metric(results=fit_quality$diff_acc_boot_ca.tc,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_boot_ca.tc))
-boot_ia_conserv.tc <- calc_int_metric(results=fit_quality$diff_acc_boot_ia.tc,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_boot_ia.tc))
-boot_single_conserv.tc <- calc_int_metric(results=fit_quality$diff_acc_boot_single.tc,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_boot_single.tc))
-
-boot_ca_accur.tc <- calc_int_metric(results=fit_quality$diff_acc_boot_ca.tc,conserv=F)/sum(!is.na(fit_quality$diff_acc_boot_ca.tc))
-boot_ia_accur.tc <- calc_int_metric(results=fit_quality$diff_acc_boot_ia.tc,conserv=F)/sum(!is.na(fit_quality$diff_acc_boot_ia.tc))
-boot_single_accur.tc <- calc_int_metric(results=fit_quality$diff_acc_boot_single.tc,conserv=F)/sum(!is.na(fit_quality$diff_acc_boot_single.tc))
-
-bayes_ca_conserv.tc <- calc_int_metric(results=fit_quality$diff_acc_bayes_ca.tc,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_bayes_ca.tc))
-bayes_ia_conserv.tc <- calc_int_metric(results=fit_quality$diff_acc_bayes_ia.tc,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_bayes_ia.tc))
-bayes_single_conserv.tc <- calc_int_metric(results=fit_quality$diff_acc_bayes_single.tc,conserv=TRUE)/sum(!is.na(fit_quality$diff_acc_bayes_single.tc))
-
-bayes_ca_accur.tc <- calc_int_metric(results=fit_quality$diff_acc_bayes_ca.tc,conserv=F)/sum(!is.na(fit_quality$diff_acc_bayes_ca.tc))
-bayes_ia_accur.tc <- calc_int_metric(results=fit_quality$diff_acc_bayes_ia.tc,conserv=F)/sum(!is.na(fit_quality$diff_acc_bayes_ia.tc))
-bayes_single_accur.tc <- calc_int_metric(results=fit_quality$diff_acc_bayes_single.tc,conserv=F)/sum(!is.na(fit_quality$diff_acc_bayes_single.tc))
-
-# Bayesian prediction interval coverage of ACC
-
-pred_ca_cover <- calc_predint_metric(results=mix.results.acc$acc_pred_ca)
-pred_ca_cover.tc <- calc_predint_metric(results=mix.results.acc$acc_pred_ca.tc)
-
-pred_ia_cover <- calc_predint_metric(results=mix.results.acc$acc_pred_ia)
-pred_ia_cover.tc <- calc_predint_metric(results=mix.results.acc$acc_pred_ia.tc)
-
-pred_single_cover <- calc_predint_metric(results=mix.results.acc$acc_pred_single)
-pred_single_cover.tc <- calc_predint_metric(results=mix.results.acc$acc_pred_single.tc)
-
-# compile metrics into tables
-table1_acc_accurate <- data.frame(ca=c(100*point_fit_metric(fit_quality$diff_acc_ca,conserv=FALSE),
-                                       100*boot_ca_accur,100*bayes_ca_accur,100*pred_ca_cover),
+table3_acc_accurate <- data.frame(Names = c("Point Estimate","Bootstrap Conf",
+                                            "Bayesian Cred"),
+                                 ca=c(100*point_fit_metric(fit_quality$diff_acc_ca,conserv=FALSE),
+                                      100*sum(as.numeric(na.omit(acc_boot_bounds$ca_overlap)))/
+                                      length(na.omit(acc_boot_bounds$ca_overlap)),
+                                      100*sum(as.numeric(na.omit(acc_bayes_bounds$ca_overlap)))/
+                                      length(na.omit(acc_bayes_bounds$ca_overlap))),
                                  ia=c(100*point_fit_metric(fit_quality$diff_acc_ia,conserv=FALSE),
-                                      100*boot_ia_accur,100*bayes_ia_accur,100*pred_ia_cover),
-                                 single=c(100*point_fit_metric(fit_quality$diff_acc_single,conserv=FALSE),
-                                          100*boot_single_accur,100*bayes_single_accur,
-                                          100*pred_single_cover),
-                                 ca.tc=c(100*point_fit_metric(fit_quality$diff_acc_ca.tc,conserv=FALSE),
-                                         100*boot_ca_accur.tc,100*bayes_ca_accur.tc,100*pred_ca_cover.tc),
-                                 ia.tc=c(100*point_fit_metric(fit_quality$diff_acc_ia.tc,conserv=FALSE),
-                                         100*boot_ia_accur.tc,100*bayes_ia_accur.tc,100*pred_ia_cover.tc),
-                                 single.tc=c(100*point_fit_metric(fit_quality$diff_acc_single.tc,conserv=FALSE),
-                                             100*boot_single_accur.tc,100*bayes_single_accur.tc,
-                                             100*pred_single_cover.tc))
+                                      100*sum(as.numeric(na.omit(acc_boot_bounds$ia_overlap)))/
+                                        length(na.omit(acc_boot_bounds$ia_overlap)),
+                                      100*sum(as.numeric(na.omit(acc_bayes_bounds$ia_overlap)))/
+                                        length(na.omit(acc_bayes_bounds$ia_overlap))),
+                                 single=c(100*point_fit_metric(fit_quality$diff_acc_single,
+                                                               conserv=FALSE),
+                                          100*sum(as.numeric(na.omit(acc_boot_bounds$single_overlap)))/
+                                            length(na.omit(acc_boot_bounds$single_overlap)),
+                                          100*sum(as.numeric(na.omit(acc_bayes_bounds$single_overlap)))/
+                                            length(na.omit(acc_bayes_bounds$single_overlap))),
+                                 ca.tc=c(100*point_fit_metric(fit_quality$diff_acc_ca.tc,
+                                                              conserv=FALSE),
+                                         100*sum(as.numeric(na.omit(acc_boot_bounds$ca_overlap.tc)))/
+                                           length(na.omit(acc_boot_bounds$ca_overlap.tc)),
+                                         100*sum(as.numeric(na.omit(acc_bayes_bounds$ca_overlap.tc)))/
+                                           length(na.omit(acc_bayes_bounds$ca_overlap.tc))),
+                                 ia.tc=c(100*point_fit_metric(fit_quality$diff_acc_ia.tc,
+                                                              conserv=FALSE),
+                                         100*sum(as.numeric(na.omit(acc_boot_bounds$ia_overlap.tc)))/
+                                           length(na.omit(acc_boot_bounds$ia_overlap.tc)),
+                                         100*sum(as.numeric(na.omit(acc_bayes_bounds$ia_overlap.tc)))/
+                                           length(na.omit(acc_bayes_bounds$ia_overlap.tc))),
+                                 single.tc=c(100*point_fit_metric(fit_quality$diff_acc_single.tc,
+                                                                  conserv=FALSE),
+                                             100*sum(as.numeric(na.omit(acc_boot_bounds$single_overlap.tc)))/
+                                               length(na.omit(acc_boot_bounds$single_overlap.tc)),
+                                             100*sum(as.numeric(na.omit(acc_bayes_bounds$single_overlap.tc)))/
+                                               length(na.omit(acc_bayes_bounds$single_overlap.tc))))
 
-table2_acc_conserv <- data.frame(ca=c(100*point_fit_metric(fit_quality$diff_acc_ca),
-                                      100*boot_ca_conserv,100*bayes_ca_conserv),
+table3_acc_accurate <- table3_acc_accurate %>% mutate_if(is.numeric, round,1)
+print(table3_acc_accurate)
+
+# test for conservative ACC interval estimates 
+acc_boot_bounds <- acc_boot_bounds %>% mutate(
+                   ca_conserv = case_when(
+                     ((log10(lo.mix)-log10(lo.ca)) >= -0.5) ~ "1",
+                     is.na(lo.ca) ~ NA_character_,
+                     TRUE ~ "0"),
+                   ia_conserv = case_when(
+                     ((log10(lo.mix)-log10(lo.ia)) >= -0.5) ~ "1",
+                     is.na(lo.ia) ~ NA_character_,
+                     TRUE ~ "0"),
+                   single_conserv = case_when(
+                     ((log10(lo.mix)-log10(lo.single)) >= -0.5) ~ "1",
+                     is.na(lo.single) ~ NA_character_,
+                     TRUE ~ "0"),
+                   ca_conserv.tc = case_when(
+                     ((log10(lo.mix)-log10(lo.ca.tc)) >= -0.5) ~ "1",
+                     is.na(lo.ca.tc) ~ NA_character_,
+                     TRUE ~ "0"),
+                   ia_conserv.tc = case_when(
+                     ((log10(lo.mix)-log10(lo.ia.tc)) >= -0.5) ~ "1",
+                     is.na(lo.ia.tc) ~ NA_character_,
+                     TRUE ~ "0"),
+                   single_conserv.tc = case_when(
+                     ((log10(lo.mix)-log10(lo.single.tc)) >= -0.5) ~ "1",
+                     is.na(lo.single.tc) ~ NA_character_,
+                     TRUE ~ "0")
+                       )
+
+acc_bayes_bounds <- acc_bayes_bounds %>% mutate(
+                   ca_conserv = case_when(
+                     ((log10(lo.mix)-log10(lo.ca)) >= -0.5) ~ "1",
+                     is.na(lo.ca) ~ NA_character_,
+                     TRUE ~ "0"),
+                   ia_conserv = case_when(
+                     ((log10(lo.mix)-log10(lo.ia)) >= -0.5) ~ "1",
+                     is.na(lo.ia) ~ NA_character_,
+                     TRUE ~ "0"),
+                   single_conserv = case_when(
+                     ((log10(lo.mix)-log10(lo.single)) >= -0.5) ~ "1",
+                     is.na(lo.single) ~ NA_character_,
+                     TRUE ~ "0"),
+                   ca_conserv.tc = case_when(
+                     ((log10(lo.mix)-log10(lo.ca.tc)) >= -0.5) ~ "1",
+                     is.na(lo.ca.tc) ~ NA_character_,
+                     TRUE ~ "0"),
+                   ia_conserv.tc = case_when(
+                     ((log10(lo.mix)-log10(lo.ia.tc)) >= -0.5) ~ "1",
+                     is.na(lo.ia.tc) ~ NA_character_,
+                     TRUE ~ "0"),
+                   single_conserv.tc = case_when(
+                     ((log10(lo.mix)-log10(lo.single.tc)) >= -0.5) ~ "1",
+                     is.na(lo.single.tc) ~ NA_character_,
+                     TRUE ~ "0")
+                       )
+
+table4_acc_conserv <- data.frame(Names = c("Point Estimate","Bootstrap Conf","Bayesian Cred"), 
+                                 ca=c(100*point_fit_metric(fit_quality$diff_acc_ca),
+                                       100*sum(as.numeric(na.omit(acc_boot_bounds$ca_conserv)))/
+                                        length(na.omit(acc_boot_bounds$ca_conserv)),
+                                       100*sum(as.numeric(na.omit(acc_bayes_bounds$ca_conserv)))/
+                                        length(na.omit(acc_bayes_bounds$ca_conserv))),
                                  ia=c(100*point_fit_metric(fit_quality$diff_acc_ia),
-                                      100*boot_ia_conserv,100*bayes_ia_conserv),
+                                      100*sum(as.numeric(na.omit(acc_boot_bounds$ia_conserv)))/
+                                        length(na.omit(acc_boot_bounds$ia_conserv)),
+                                      100*sum(as.numeric(na.omit(acc_bayes_bounds$ia_conserv)))/
+                                        length(na.omit(acc_bayes_bounds$ia_conserv))),
                                  single=c(100*point_fit_metric(fit_quality$diff_acc_single),
-                                          100*boot_single_conserv,100*bayes_single_conserv),
+                                          100*sum(as.numeric(na.omit(acc_boot_bounds$single_conserv)))/
+                                            length(na.omit(acc_boot_bounds$single_conserv)),
+                                          100*sum(as.numeric(na.omit(acc_bayes_bounds$single_conserv)))/
+                                            length(na.omit(acc_bayes_bounds$single_conserv))),
                                  ca.tc=c(100*point_fit_metric(fit_quality$diff_acc_ca.tc),
-                                         100*boot_ca_conserv.tc,100*bayes_ca_conserv.tc),
+                                         100*sum(as.numeric(na.omit(acc_boot_bounds$ca_conserv.tc)))/
+                                           length(na.omit(acc_boot_bounds$ca_conserv.tc)),
+                                         100*sum(as.numeric(na.omit(acc_bayes_bounds$ca_conserv.tc)))/
+                                           length(na.omit(acc_bayes_bounds$ca_conserv.tc))),
                                  ia.tc=c(100*point_fit_metric(fit_quality$diff_acc_ia.tc),
-                                         100*boot_ia_conserv.tc,100*bayes_ia_conserv.tc),
+                                         100*sum(as.numeric(na.omit(acc_boot_bounds$ia_conserv.tc)))/
+                                           length(na.omit(acc_boot_bounds$ia_conserv.tc)),
+                                         100*sum(as.numeric(na.omit(acc_bayes_bounds$ia_conserv.tc)))/
+                                           length(na.omit(acc_bayes_bounds$ia_conserv.tc))),
                                  single.tc=c(100*point_fit_metric(fit_quality$diff_acc_single.tc),
-                                             100*boot_single_conserv.tc,100*bayes_single_conserv.tc))
+                                             100*sum(as.numeric(na.omit(acc_boot_bounds$single_conserv.tc)))/
+                                               length(na.omit(acc_boot_bounds$single_conserv.tc)),
+                                             100*sum(as.numeric(na.omit(acc_bayes_bounds$single_conserv.tc)))/
+                                               length(na.omit(acc_bayes_bounds$single_conserv.tc))))
+
+table4_acc_conserv <- table4_acc_conserv %>% mutate_if(is.numeric, round,1)
+print(table4_acc_conserv)
 ```
 
 ## Evaluate fit quality for full curves
@@ -404,7 +572,7 @@ for (jj in 1:nrow(mix.results.all)){
   dat_eval <- subset(mix_dat, conc<=mix_top_loc)
   if (mix.results.all$m4id_mix[jj] %in% mix.info$m4id_mix){
     norm_factor <- mix.info[mix.info$m4id_mix==mix.results.all$m4id_mix[jj],]$edpt_top
-    sing_info <- mc5_attg_endpts[m4id==mix.results.all$potent_sing_id[jj],]
+    sing_info <- mc5[m4id==mix.results.all$potent_sing_id[jj],]
     
     # Residual Sum of Squares ratios
     ca_curve <- mix.results.all$ca_curve[[jj]]
@@ -510,7 +678,7 @@ for (jj in 1:nrow(mix.results.all)){
   # Repeat for ToxCast chemical library
   if (mix.results.all$m4id_mix[jj] %in% mix.info.tc$m4id_mix){
     norm_factor <- mix.info.tc[mix.info.tc$m4id_mix==mix.results.all$m4id_mix[jj],]$edpt_top
-    sing_info.tc <- mc5_attg_endpts[m4id==mix.results.all$potent_sing_id.tc[jj],]
+    sing_info.tc <- mc5[m4id==mix.results.all$potent_sing_id.tc[jj],]
     
     # Residual Sum of Squares ratios
     ca_curve.tc <- mix.results.all$ca_curve.tc[[jj]]
@@ -642,6 +810,7 @@ full_curve_table <- data.frame(ca=c(100*rss_fit_metric(fit_quality$rss_ratio_ca)
                                          100*interval_fit_metric(fit_quality$single_bayes_overlap.tc),
                                          100*pred_fit_metric(fit_quality$single_coverage.tc)))
 
+print(round(full_curve_table,1))
 
 ```
 
