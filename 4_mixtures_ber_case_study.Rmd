@@ -50,9 +50,10 @@ sampleC <- na.omit(demo2009_sampleC)
 sampleC_limit <- ifelse(sampleC[,4]==1,sampleC[,3]<- 0,sampleC[,3] <- sampleC[,3])
 
 # Remove the 3 chemicals not tested in the ToxCast chemical library:DTXSID8031861, DTXSID10624392,DTXSID5062760
-dtxsids_all <- pfas_chems$DSSTox_Substance_Id[!pfas_chems$DSSTox_Substance_Id %in% c('DTXSID8031861', 
-                                                                                 'DTXSID10624392',
-                                                                                 'DTXSID5062760')]
+dtxsids_all <- pfas_chems$DSSTox_Substance_Id[!pfas_chems$DSSTox_Substance_Id %in% 
+                                                c('DTXSID8031861',
+                                                  'DTXSID10624392',
+                                                  'DTXSID5062760')]
 # check if any chemicals have more than 25% of data below the limit of detection
 below_lld_test <- data.frame(dtxsid=dtxsids_all,lld_frac=NA)
 for(jj in 1:length(dtxsids_all)){
@@ -220,7 +221,7 @@ pfas_combos$results[ii] <- list(data.frame(pfas_combos$mix_concs[[ii]],
 Get single chemical ACC and BER values and analyze by survey demographics
 ```{r}
 # match single chemicals
-pfas_single <- data.frame(dtsxid=mc5_mix_132$dsstox_substance_id,acc=mc5_data$acc)
+pfas_single <- data.frame(dtsxid=mc5_data$dsstox_substance_id,acc=mc5_data$acc)
 for (ii in 1:nrow(pfas_single)){
   chem_id <- pfas_chems$external_id[pfas_chems$DSSTox_Substance_Id==pfas_single$dtsxid[ii]]
   mw <- pfas_chems$Structure_MolWt[pfas_chems$DSSTox_Substance_Id==pfas_single$dtsxid[ii]]
@@ -384,6 +385,7 @@ for (ii in 1:11){
 ```
 
 ## Plot population BER
+Figure 8
 Represent distributions as boxplots and plot for each single chemical and mixture
 ```{r}
 # combine single and mixture information
@@ -417,8 +419,9 @@ plot_order <- order(pfas_combos$popmed, decreasing=TRUE)
 # colors
 plot_colors <- hcl.colors(16, palette = "Blues 3")
 
-tiff("ber_population_dists_aeid132.tiff", units="in", width=15, height=11, res=600)
-par(mar=c(15,8,2,1))
+tiff("./figures/Figure_8.tiff", units="mm", width=190, height=120, res=600)
+# par(mar=c(15,8,2,1))
+par(mar=c(7,5,1,1))
 # plot first chemical
 ii <- 1
 test_df <- merge(pfas_combos$results[[plot_order[ii]]],nhanes_vars,by="SEQN")
@@ -431,7 +434,7 @@ nhanes_design <- svydesign(id = ~SDMVPSU,
 # median analysis
 pop_med <- svyquantile(~ber, design = nhanes_design, quantile=c(0.5), ci=TRUE)
 
-svyboxplot(~ber~1, nhanes_design, all.outliers=TRUE, ylab="BER", xlab=" ",main=" ", names=FALSE, log="y", at=c(1), xlim=c(0.5,15.5), ylim=c(40,20E4),col=c(plot_colors[17-ii]),cex.lab=2,cex.axis=1.5)
+svyboxplot(~ber~1, nhanes_design, all.outliers=TRUE, ylab="BER", xlab=" ",main=" ", names=FALSE, log="y", at=c(1), xlim=c(0.5,15.5), ylim=c(40,20E4),col=c(plot_colors[17-ii]),cex=0.4,cex.lab=1,cex.axis=0.7, medlwd=1.5)
 
 # add remaining chemicals to plot
 for(ii in 2:15){
@@ -443,10 +446,11 @@ for(ii in 2:15){
                              nest = TRUE,
                              data = pfas_mix_demo)
   svyboxplot(~ber~1, nhanes_design, all.outliers=TRUE,
-             main=" ", add=TRUE, at=c(ii),col=c(plot_colors[17-ii]), cex.lab=2,cex.axis=1.5)
+             main=" ", add=TRUE, at=c(ii),col=c(plot_colors[17-ii]), 
+             cex=0.4,cex.lab=1,cex.axis=0.7,medlwd=1.5)
 }
 axis(1,at = c(1:15),labels=FALSE)
-text(x=c(1:15),y=23,labels=c(pfas_combos$chem_name[plot_order]),srt=45,adj=1,xpd=NA,cex=1.5)
+text(x=c(1:15),y=20,labels=c(pfas_combos$chem_name[plot_order]),srt=37,adj=1,xpd=NA,cex=0.7)
 dev.off()
 
 
@@ -499,7 +503,7 @@ pfas_demo_plot <- data.frame(pfas_info_plot1,ber=pfas_info_plot2$ber)
 # Bubble plot to compare median BER values of survey demographic groups and median population BER
 p1 <- ggplot(pfas_demo_plot, aes(x=demographic,y=factor(chem_name,unique(chem_name)),size=ber,fill=value))+
   geom_point(shape=21)+
-  scale_size(range=c(3,12),name="Median BER: ",breaks=c(6E2,1E3,5E3,19.5E3))+ #132
+  scale_size(range=c(2,9),name="Median BER: ",breaks=c(6E2,1E3,5E3,19.5E3))+ #132
   # scale_size(range=c(3,12),name="Median BER: ",breaks=c(7.5E2,1E3,5E3,17.5E3))+ #134
   # scale_size(range=c(3,12),name="Median BER: ",breaks=c(1.85E3,5E3,10E3,30.5E3))+ #102
   scale_fill_gradientn(colours = c("red","white","midnightblue"),
@@ -507,17 +511,17 @@ p1 <- ggplot(pfas_demo_plot, aes(x=demographic,y=factor(chem_name,unique(chem_na
                        limits=c(0.8,1.6),
                        oob=scales::squish,
                        name= TeX(r'($\frac{Group\, Median\, BER}{Population\, Median\, BER}: \; \;$)'))+
-  theme_bw(base_size=20)+
-  theme(axis.text.x = element_text(angle=50,hjust=1,vjust=1.0,size=14, color="black"),
-        axis.text.y = element_text(size = 14,color="black"),
+  theme_bw(base_size=12)+
+  theme(axis.text.x = element_text(angle=40,hjust=1,vjust=1.0,size=11, color="black"),
+        axis.text.y = element_text(size = 11,color="black"),
         axis.title = element_blank(),
-        legend.text = element_text(size=14),
-        legend.title=element_text(size=16),
+        legend.text = element_text(size=12),
+        legend.title=element_text(size=12),
         legend.position="bottom",
         legend.box = "vertical",
         legend.margin=margin(t=0,b=0),
-        legend.key.width=unit(1.5,"cm"),
-        plot.margin=margin(t=30,r=20,b=0,l=20))+
+        legend.key.width=unit(10,"mm"),
+        plot.margin=margin(t=10,r=5,b=0,l=10))+
   guides(size = guide_legend(order = 1),
          colorbar = guide_legend(order = 2))+
   scale_x_discrete(labels=c("Female"="Female","Male"="Male",
@@ -530,31 +534,73 @@ p1 <- ggplot(pfas_demo_plot, aes(x=demographic,y=factor(chem_name,unique(chem_na
 # plot of median ACC values 
 pfas_combos$popacc[c(12:15)] <- pfas_single$popacc
 p2 <- ggplot(pfas_combos[ber_order,], aes(x=popacc,y=factor(chem_name,unique(chem_name))))+
-  geom_point(size=3)+
+  geom_point(size=2)+
   scale_x_log10(limits=c(10,60),labels = label_number(drop0trailing = TRUE))+
-  theme_bw(base_size=20)+
+  theme_bw(base_size=12)+
   xlab(expression(paste("Median Pop. ACC [",mu, "M]")))+ 
   theme(axis.text.y = element_blank(),
         axis.ticks.y=element_blank(),
         axis.title.y = element_blank(),
-        axis.title.x = element_text(size=14,margin = margin(t=-100)),
+        axis.title.x = element_text(size=11,margin = margin(t=-80)),
         panel.grid.major.x = element_blank(),
-        panel.grid.minor.x = element_blank())
+        panel.grid.minor.x = element_blank(),
+        plot.margin=margin(t=10,r=15,b=0,l=0))
 
+# get legend
+legend <- cowplot::get_plot_component(p1,'guide-box-bottom',return_all=TRUE)
+# remove legend
+p1 <- p1 + theme(legend.position = "none")
   
-tiff("ber_bubbleplot_aeid132.tiff", units="in", width=12, height=10, res=800)
-plot_grid(p1,p2,align="h",ncol=2, rel_widths=c(4/5,1/5))
+tiff("./figures/Figure_9.tiff", units="mm", width=190, height=200, res=600)
+plot_grid(
+  plot_grid(p1,p2,align="h",nrow=1,ncol=2,rel_widths=c(4/5,1/5)),
+  plot_grid(NULL,legend,NULL, nrow=1,rel_widths=c(0.2,1,0.1)),
+  rel_heights=c(1,0.2),
+  nrow=2
+)
 dev.off()
+
 ```
-## Figure S1
+## Figure S2
 Supplemental plot for ATG_PPRE_CIS and ATG_PPARg_TRANS
 ```{r}
-# tiff("ber_bubbleplot_aeid102_134.tiff", units="in", width=20, height=10, res=800)
-# plot_grid(p1,p2,labels='AUTO',label_size=28) #c('A','B'),label_size=32
+# rerun script for each endpoint to generate each plot
+# p_102 <- ggplot(pfas_demo_plot, aes(x=demographic,y=factor(chem_name,unique(chem_name)),size=ber,fill=value))+
+#   geom_point(shape=21)+
+#   # scale_size(range=c(2,9),name="Median BER: ",breaks=c(6E2,1E3,5E3,19.5E3))+ #132
+#   # scale_size(range=c(1,6),name="Median BER: ",breaks=c(7.5E2,3E3,17.5E3))+ #134 breaks=c(7.5E2,1E3,5E3,17.5E3)
+#   scale_size(range=c(1,6),name="Median BER: ",breaks=c(1.85E3,7E3,30.5E3))+ #102
+#   scale_fill_gradientn(colours = c("red","white","midnightblue"),
+#                        values=rescale(c(min(pfas_demo_plot$value),1,max(pfas_demo_plot$value))),
+#                        limits=c(0.8,1.6),
+#                        oob=scales::squish,
+#                        name= TeX(r'($\frac{Group\, Median\, BER}{Population\, Median\, BER}: \; \;$)'))+
+#   theme_bw(base_size=10)+
+#   theme(axis.text.x = element_text(angle=45,hjust=1,vjust=1.0,size=8, color="black"),
+#         axis.text.y = element_text(size = 7,color="black"),
+#         axis.title = element_blank(),
+#         legend.text = element_text(size=8),
+#         legend.title=element_text(size=8),
+#         legend.position="bottom",
+#         legend.box = "vertical",
+#         legend.margin=margin(t=0,r=15,b=0,l=-20),
+#         legend.key.width=unit(5,"mm"),
+#         plot.margin=margin(t=10,r=5,b=0,l=2))+
+#   guides(size = guide_legend(order = 1),
+#          colorbar = guide_legend(order = 2))+
+#   scale_x_discrete(labels=c("Female"="Female","Male"="Male",
+#                             "Young"="Age < 20 Years", "Old"= expression("Age">="20 Years"),
+#                             "Mexican"="Mexican American","Hispanic"="Other Hispanic",
+#                             "White"="Non-Hispanic White","Black"="Non-Hispanic Black",
+#                             "Other_Race"="Other Race",
+#                             "LowIncome"="Family Income:Poverty < 5","HighIncome"=expression("Family Income:Poverty">=5)))
+# 
+# tiff("./figures/Figure_S2.tiff", units="mm", width=190, height=150, res=600)
+# plot_grid(p_102,p_134,labels='AUTO',label_size=12) #c('A','B'),label_size=12
 # dev.off()
 ```
 
-## Figure S2
+## Figure S3
 Supplemental plot of trends in exposure across demographics
 ```{r}
 
@@ -601,7 +647,7 @@ pfas_demo_plot <- data.frame(pfas_info_plot1,exposure=pfas_info_plot2$exp)
 # Bubble plot to compare median BER values of survey demographic groups and median population BER
 p1 <- ggplot(pfas_demo_plot, aes(x=demographic,y=factor(chem_name,unique(chem_name)),size=exposure,fill=value))+
   geom_point(shape=21)+
-  scale_size(range=c(3,12),name="Median Exposure: ",breaks=c(2.5E-3,1E-2,4.2E-2),labels = label_scientific())+ #132
+  scale_size(range=c(2,9),name="Median Exposure: ",breaks=c(2.5E-3,1E-2,4.2E-2),labels = label_scientific())+ #132
   # scale_size(range=c(3,12),name="Median BER: ",breaks=c(7.5E2,1E3,5E3,17.5E3))+ #134
   # scale_size(range=c(3,12),name="Median BER: ",breaks=c(1.85E3,5E3,10E3,30.5E3))+ #102
   scale_fill_gradientn(colours = c("midnightblue","white","red"),
@@ -609,18 +655,18 @@ p1 <- ggplot(pfas_demo_plot, aes(x=demographic,y=factor(chem_name,unique(chem_na
                        limits=c(0.6,1.3),
                        oob=scales::squish,
                        name= TeX(r'($\frac{Group\, Median\, Exposure}{Population\, Median\, Exposure}: \; \;$)'))+
-  theme_bw(base_size=20)+
-  theme(axis.text.x = element_text(angle=50,hjust=1,vjust=1.0,size=14, color="black"),
-        axis.text.y = element_text(size = 14,color="black"),
+  theme_bw(base_size=12)+
+  theme(axis.text.x = element_text(angle=40,hjust=1,vjust=1.0,size=11, color="black"),
+        axis.text.y = element_text(size = 11,color="black"),
         axis.title = element_blank(),
-        legend.text = element_text(size=14),
-        legend.title=element_text(size=16),
+        legend.text = element_text(size=12),
+        legend.title=element_text(size=12),
         legend.position="bottom",
         legend.box = "vertical",
         legend.margin=margin(t=0,b=0),
-        legend.spacing.x=unit(0,"cm"),
-        legend.key.width=unit(1,"cm"),
-        plot.margin=margin(t=30,r=10,b=0,l=20))+
+        legend.spacing.x=unit(0,"mm"),
+        legend.key.width=unit(10,"mm"),
+        plot.margin=margin(t=10,r=15,b=0,l=10))+
   guides(size = guide_legend(order = 1),
          colorbar = guide_legend(order = 2))+
   scale_x_discrete(labels=c("Female"="Female","Male"="Male",
@@ -633,20 +679,35 @@ p1 <- ggplot(pfas_demo_plot, aes(x=demographic,y=factor(chem_name,unique(chem_na
 # plot of median ACC values 
 
 p2 <- ggplot(pfas_combos[ber_order,], aes(x=popexp,y=factor(chem_name,unique(chem_name))))+
-  geom_point(size=3)+
+  geom_point(size=2)+
   scale_x_log10(labels = label_number(drop0trailing = TRUE))+ #limits=c(10,60),
-  theme_bw(base_size=20)+
+  theme_bw(base_size=12)+
   xlab(expression(paste("Median Pop. Exposure [",mu, "M]")))+ 
   theme(axis.text.y = element_blank(),
         axis.ticks.y=element_blank(),
         axis.title.y = element_blank(),
-        axis.title.x = element_text(size=14,margin = margin(t=-100)),
+        axis.title.x = element_text(size=11,margin = margin(t=-80)),
         panel.grid.major.x = element_blank(),
-        panel.grid.minor.x = element_blank())
+        panel.grid.minor.x = element_blank(),
+        plot.margin=margin(t=10,r=25,b=0,l=0))
 
   
-tiff("exposure_bubbleplot_aeid132.tiff", units="in", width=12, height=10, res=800)
-plot_grid(p1,p2,align="h",ncol=2, rel_widths=c(7/9,2/9))
+# tiff("./figures/Figure_S3.tiff", units="mm", width=190, height=200, res=600)
+# plot_grid(p1,p2,align="h",ncol=2, rel_widths=c(7/9,2/9))
+# dev.off()
+
+# get legend
+legend <- cowplot::get_plot_component(p1,'guide-box-bottom',return_all=TRUE)
+# remove legend
+p1 <- p1 + theme(legend.position = "none")
+  
+tiff("./figures/Figure_S3.tiff", units="mm", width=190, height=200, res=600)
+plot_grid(
+  plot_grid(p1,p2,align="h",nrow=1,ncol=2,rel_widths=c(7/9,2/9)),
+  plot_grid(NULL,legend,NULL, nrow=1,rel_widths=c(0.2,1,0.1)),
+  rel_heights=c(1,0.2),
+  nrow=2
+)
 dev.off()
 ```
 
