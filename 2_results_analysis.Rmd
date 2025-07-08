@@ -134,9 +134,11 @@ mc5_mix_1 <- mc5_mix_all %>% filter(!(hitc>=0.9 & top<0))
 # remove mixtures with active components with negative response
 mc5_sing_act_neg <- mc5_sing %>% filter(hitc >= 0.9 & top<0)
 mc5_mix_2 <- mc5_mix_1 %>% filter(!(m4id_1 %in% mc5_sing_act_neg$m4id) & !(m4id_2 %in% mc5_sing_act_neg$m4id))
-# remove active fitc=40 components (no slope data captured)
+# remove active fitc=40 or fitc=36 components (no slope data captured)
 single_comp_40 <- mc5_sing %>% filter(fitc == 40 | fitc==36)
 mc5_mix <- subset(mc5_mix_2,!(m4id_1 %in% single_comp_40$m4id)& !(m4id_2 %in% single_comp_40$m4id))
+# remove mixtures that do not capture the slope/AC50 data
+mc5_mix <- subset(mc5_mix,!(fitc==40 | fitc==36))
 # remove strangely behaving mixture
 mc5_mix <- subset(mc5_mix,!(m4id==12837598))
 
@@ -191,6 +193,8 @@ mc5_mix_2 <- mc5_mix_1 %>% filter(!(m4id_1 %in% mc5_sing_act_neg$m4id) & !(m4id_
 # remove active fitc=40 components (no slope data captured)
 single_comp_40 <- mc5_sing_tc %>% filter(fitc==40 | fitc==36)
 mc5_mix_tc <- subset(mc5_mix_2,!(m4id_1 %in% single_comp_40$m4id)& !(m4id_2 %in% single_comp_40$m4id))
+# remove mixtures that do not capture the slope/AC50 data
+mc5_mix_tc <- subset(mc5_mix_tc,!(fitc==40 | fitc==36))
 # remove strangely behaving mixture and remove mixtures with strangely behaving TC single component
 mc5_mix_tc <- subset(mc5_mix_tc,!(m4id==12837598) & !(m4id_1==12518380) & !(m4id_2==12518380))
 
