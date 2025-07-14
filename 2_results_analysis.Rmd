@@ -342,6 +342,8 @@ acc_bayes_lo_bounds <- data.frame(lo.mix=sapply(mix.results.acc$acc_bayes_mix,
                                                  accint_quantiles)[1,],
                                  lo.single.tc=sapply(mix.results.acc$acc_bayes_single.tc,
                                                      accint_quantiles)[1,])
+# set any negative low bounds to zero
+acc_bayes_lo_bounds$lo.mix <- ifelse(acc_bayes_lo_bounds$lo.mix<0,1E-8,acc_bayes_lo_bounds$lo.mix)
 
 acc_bayes_hi_bounds <- data.frame(hi.mix=sapply(mix.results.acc$acc_bayes_mix,
                                                 accint_quantiles)[2,],
@@ -817,4 +819,5 @@ full_curve_table <- data.frame(ca=c(100*rss_fit_metric(fit_quality$rss_ratio_ca)
 print(round(full_curve_table,1))
 
 ```
+
 
