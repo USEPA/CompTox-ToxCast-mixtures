@@ -262,7 +262,7 @@ for (ii in 1:nrow(pfas_single)){
                              data = pfas_mix_demo)
   # evaluate by whole population median
   pop_med <- svyquantile(~ber, design = nhanes_design, quantile=c(0.5), ci=TRUE)
- # evaluate mediants based on survey demographic groups
+ # evaluate medians based on survey demographic groups
   gender_med <- svyby(~ber, ~RIAGENDR,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
   age_med <- svyby(~ber, ~age_group,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
   race_med <- svyby(~ber, ~RIDRETH1,design=nhanes_design,svyquantile,quantile=c(0.5), ci=TRUE)
@@ -647,7 +647,7 @@ pfas_demo_plot <- data.frame(pfas_info_plot1,exposure=pfas_info_plot2$exp)
 # Bubble plot to compare median BER values of survey demographic groups and median population BER
 p1 <- ggplot(pfas_demo_plot, aes(x=demographic,y=factor(chem_name,unique(chem_name)),size=exposure,fill=value))+
   geom_point(shape=21)+
-  scale_size(range=c(2,9),name="Median Exposure: ",breaks=c(2.5E-3,1E-2,4.2E-2),labels = label_scientific())+ #132
+  scale_size(range=c(2,9),name=expression(paste("Median Exposure [",mu, "M]: ")),breaks=c(2.5E-3,1E-2,4.2E-2),labels = label_scientific())+ #132
   # scale_size(range=c(3,12),name="Median BER: ",breaks=c(7.5E2,1E3,5E3,17.5E3))+ #134
   # scale_size(range=c(3,12),name="Median BER: ",breaks=c(1.85E3,5E3,10E3,30.5E3))+ #102
   scale_fill_gradientn(colours = c("midnightblue","white","red"),
@@ -680,7 +680,8 @@ p1 <- ggplot(pfas_demo_plot, aes(x=demographic,y=factor(chem_name,unique(chem_na
 
 p2 <- ggplot(pfas_combos[ber_order,], aes(x=popexp,y=factor(chem_name,unique(chem_name))))+
   geom_point(size=2)+
-  scale_x_log10(labels = label_number(drop0trailing = TRUE))+ #limits=c(10,60),
+  # scale_x_log10(labels = label_number(drop0trailing = TRUE))+ #limits=c(10,60),
+  scale_x_log10(labels = label_scientific())+ #limits=c(10,60),
   theme_bw(base_size=12)+
   xlab(expression(paste("Median Pop. Exposure [",mu, "M]")))+ 
   theme(axis.text.y = element_blank(),
