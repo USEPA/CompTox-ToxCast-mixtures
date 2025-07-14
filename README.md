@@ -12,13 +12,13 @@ This repository accompanies pilot work to implement mathematical models of mixtu
 ## Usage
 The code is split into four sections that can be run in sequence or independently. All steps require tcpl and tcplfit2.
 1. Fit single component and observed mixture concentration-response data with best fit model from _tcplfit2_, bootstrap resampling, and a Bayesian framework. Simulate the CA, IA, and MP mixture models from single component concentration-response obtained with each fitting approach. Single component concentration-reponse is obtained from tested chemicals screened in this work and from existing legacy data within ToxCast.
-    * File: 1_mixtures_analysis.Rmd
+    * File: [1_mixtures_analysis.Rmd](1_mixtures_analysis.Rmd)
 2. Perform analysis of results for manuscript. Filter mixture and single component activity rates based on hitcalls. Assess qulaity-of-fit of simulated mixtures from the mathematical models compared to the observed mixture by evaluating the accuracy of ACC predictions, conservative ACC predictive ability, and full concentration-response curves.
-    * File: 2_results_analysis.Rmd
+    * File: [2_results_analysis.Rmd](2_results_analysis.Rmd)
 3. Generate figures for manuscript, including plotting all observed mixtures and the CA, IA, and MP model simulations. 
-    * File: 3_mixture_figures.Rmd
+    * File: [3_mixture_figures.Rmd](3_mixture_figures.Rmd)
 4. Conduct bioactivty:exposure ratio (BER) case study to compare simulated mixtures point of departures to [CDC NHANES](https://www.cdc.gov/nchs/nhanes/index.html) human blood serum exposure concentrations. 
-    * File: 4_mixtures_ber_case_study.Rmd
+    * File: [4_mixtures_ber_case_study.Rmd](4_mixtures_ber_case_study.Rmd)
 
 A vignette is provided that walks through an example of the full procedure for simulating a mixture model from single chemical components for one example binary mixture.
 
