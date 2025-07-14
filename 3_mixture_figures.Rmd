@@ -980,7 +980,7 @@ p_mix <- ggplot_build(plotlines.func(index=ex_index,mix_input=mix.info,tc=FALSE)
                             legend.key.width = unit(7, "mm"),
                             legend.key.height = unit(3.5, "mm"),
                             axis.text = element_text(color="black"),
-                            plot.margin = margin(t=0.3, r=0.3,b=0.3,l=0.8, unit = "cm"),
+                            plot.margin = margin(t=0.3, r=0.3,b=0.3,l=0.6, unit = "cm"),
                             plot.title = element_text(size=14,hjust=0.5, face="bold"),
                             plot.subtitle = element_text(size=14,hjust=0.5, face="bold")))
 p_mix$data[[1]]$linewidth <- 0.75
@@ -1013,7 +1013,7 @@ p_boot <- ggplot_build(plotint.func(index=ex_index,tc=FALSE) +
                             legend.key.height = unit(2, "mm"),
                             legend.spacing.y = unit(-0.1, "mm"),
                             axis.text = element_text(color="black"),
-                            plot.margin = margin(t=0.2, r=0.5,b=0.2,l=0.8, unit = "cm"),
+                            plot.margin = margin(t=0.2, r=0.5,b=0.2,l=0.6, unit = "cm"),
                             plot.title = element_text(size=12,hjust=0.5, face="bold"),
                             plot.subtitle = element_text(size=12,hjust=0.5, face="bold")))
 p_boot$data[[1]]$linewidth <- 0.5
@@ -1041,7 +1041,7 @@ p_bayes <- ggplot_build(plotbayesintia.func(index=ex_index,tc=FALSE) +
                             legend.key.height = unit(2, "mm"),
                             legend.spacing.y = unit(-0.1, "mm"),
                             axis.text = element_text(color="black"),
-                            plot.margin = margin(t=0.2, r=0.5,b=0.2,l=0.8, unit = "cm"),
+                            plot.margin = margin(t=0.2, r=0.5,b=0.2,l=0.6, unit = "cm"),
                             plot.title = element_text(size=12,hjust=0.5, face="bold"),
                             plot.subtitle = element_text(size=12,hjust=0.5, face="bold")))
 
@@ -1059,8 +1059,21 @@ plot_grid(
   plot_grid(p_boot,p_bayes,nrow=2),
   ncol=3, rel_widths=c(0.6,0.9,0.8)
 )+
-annotate("segment",linewidth=1,x=0.21,y=0.78,xend=0.35,yend=0.73,arrow=arrow())+
-annotate("segment",linewidth=1,x=0.21,y=0.17,xend=0.35,yend=0.23,arrow=arrow())
+annotate("segment",linewidth=1,x=0.21,y=0.78,xend=0.34,yend=0.73,arrow=arrow())+
+annotate("segment",linewidth=1,x=0.21,y=0.17,xend=0.34,yend=0.23,arrow=arrow())
+dev.off()
+
+
+png("./figures/GraphicalAbstract.png", units="mm", width=170, height=100, res=600)
+plot_grid(
+  plot_grid(p_comp1,p_comp2, nrow=2)+
+    annotate("text", x=0.55, y=0.5, size=16,label="+"),
+  plot_grid(NULL,p_mix,NULL,nrow=3,rel_heights=c(0.15,1,0.15)),
+  plot_grid(p_boot,p_bayes,nrow=2),
+  ncol=3, rel_widths=c(0.49,0.91,0.82)
+)+
+annotate("segment",linewidth=1,x=0.18,y=0.78,xend=0.31,yend=0.73,arrow=arrow())+
+annotate("segment",linewidth=1,x=0.18,y=0.17,xend=0.31,yend=0.23,arrow=arrow())
 dev.off()
 
 
