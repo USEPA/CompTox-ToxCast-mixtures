@@ -22,4 +22,4 @@ The code is split into four sections that can be run in sequence or independentl
 
 A vignette is provided that walks through an example of the full procedure for simulating a mixture model from single chemical components for one example binary mixture.
 
-![Graphical Abstract.](/figures/GraphicalAbstract.tiff)
+![Graphical Abstract.](/figures/GraphicalAbstract.tiff | width=100)
