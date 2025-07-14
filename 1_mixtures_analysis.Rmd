@@ -1180,96 +1180,96 @@ for (ii in 1:nrow(mix.results.all)){
   }
 }
 
-# Bayesian Prediction Interval
-
-mix.results.acc$acc_pred_single <- NA
-mix.results.acc$acc_pred_single.tc <- NA
-for (ii in 1:nrow(mix.results.acc)){
-  if (!(mix.results.all$m4id_mix[ii] %in% mix.info$m4id_mix)) {
-    mix.results.acc$acc_pred_single[ii] <- NA
-  } else {
-    single_info <- single.info[single.info$m4id==mix.results.all$potent_sing_id[ii],]
-    single_dat <- mc5[m4id==single_info$m4id]
-    indices <- sample(1:10000, num_sample, replace=F)
-    acc_pred <- rep(NA,num_sample)
-    for (ss in 1:num_sample){
-      params <- single_info$bayesparams[[1]][indices[ss],]
-      top_val <- single_curve_top(dat=single_dat,params=params) 
-      min_val <- single_curve_min(dat=single_dat,params=params) 
-      y_err_samp <- single_dat$coff - rt(1,df=4)*params$sigma
-      if (top_val<0){
-        acc_pred[ss] <- NA
-      } else {
-        if (top_val<y_err_samp){
-          if (single_dat$modl %in% c("poly1","pow","exp2","exp3")){
-            acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,
-                                             single_dat=single_dat)
-          } else if(single_dat$modl=='poly2'){
-            # all poly2 curves can extend except for the concave down increasing
-            if (!(params$a<0 & params$b<0)){
-              acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,
-                                               single_dat=single_dat)
-            } else{
-              acc_pred[ss] <- 10000
-            }
-          } else {
-            acc_pred[ss] <- 10000
-          }
-        } else if (min_val>y_err_samp){
-          acc_pred[ss] <- -10000
-        } else{
-          acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,
-                                           single_dat=single_dat)
-        }
-      }
-    }
-    mix.results.acc$acc_pred_single[ii] <- list(acc_pred)
-  }
-}
-
-# repeat for TC chemical library
-for (ii in 1:nrow(mix.results.acc)){
-  if (!(mix.results.all$m4id_mix[ii] %in% mix.info.tc$m4id_mix)) {
-    mix.results.acc$acc_pred_single.tc[ii] <- NA
-  } else {
-    single_info <- single.info.tc[single.info.tc$m4id==mix.results.all$potent_sing_id.tc[ii],]
-    single_dat <- mc5[m4id==single_info$m4id]
-    # Bayesian credible interval
-    indices <- sample(1:10000, num_sample, replace=F)
-    acc_pred <- rep(NA,num_sample)
-    for (ss in 1:num_sample){
-      params <- single_info$bayesparams[[1]][indices[ss],]
-      top_val <- single_curve_top(dat=single_dat,params=params)
-      min_val <- single_curve_min(dat=single_dat,params=params) 
-      y_err_samp <- single_dat$coff - rt(1,df=4)*params$sigma
-      if (top_val<0){
-        acc_pred[ss] <- NA
-      } else {
-        if (top_val<y_err_samp){
-          if (single_dat$modl %in% c("poly1","pow","exp2","exp3")){
-            acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,
-                                             single_dat=single_dat)
-          } else if(single_dat$modl=='poly2'){
-            # all poly2 curves can extend except for the concave down increasing
-            if (!(params$a<0 & params$b<0)){
-              acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,single_dat=single_dat)
-            } else{
-              acc_pred[ss] <- 10000
-            }
-          } else {
-            acc_pred[ss] <- 10000
-          }
-        } else if (min_val>y_err_samp){
-          acc_pred[ss] <- -10000
-        } else{
-          acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,
-                                           single_dat=single_dat)
-        }
-      }
-    }
-    mix.results.acc$acc_pred_single.tc[ii] <- list(acc_pred)
-  }
-}
+# # Bayesian Prediction Interval
+# 
+# mix.results.acc$acc_pred_single <- NA
+# mix.results.acc$acc_pred_single.tc <- NA
+# for (ii in 1:nrow(mix.results.acc)){
+#   if (!(mix.results.all$m4id_mix[ii] %in% mix.info$m4id_mix)) {
+#     mix.results.acc$acc_pred_single[ii] <- NA
+#   } else {
+#     single_info <- single.info[single.info$m4id==mix.results.all$potent_sing_id[ii],]
+#     single_dat <- mc5[m4id==single_info$m4id]
+#     indices <- sample(1:10000, num_sample, replace=F)
+#     acc_pred <- rep(NA,num_sample)
+#     for (ss in 1:num_sample){
+#       params <- single_info$bayesparams[[1]][indices[ss],]
+#       top_val <- single_curve_top(dat=single_dat,params=params) 
+#       min_val <- single_curve_min(dat=single_dat,params=params) 
+#       y_err_samp <- single_dat$coff - rt(1,df=4)*params$sigma
+#       if (top_val<0){
+#         acc_pred[ss] <- NA
+#       } else {
+#         if (top_val<y_err_samp){
+#           if (single_dat$modl %in% c("poly1","pow","exp2","exp3")){
+#             acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,
+#                                              single_dat=single_dat)
+#           } else if(single_dat$modl=='poly2'){
+#             # all poly2 curves can extend except for the concave down increasing
+#             if (!(params$a<0 & params$b<0)){
+#               acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,
+#                                                single_dat=single_dat)
+#             } else{
+#               acc_pred[ss] <- 10000
+#             }
+#           } else {
+#             acc_pred[ss] <- 10000
+#           }
+#         } else if (min_val>y_err_samp){
+#           acc_pred[ss] <- -10000
+#         } else{
+#           acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,
+#                                            single_dat=single_dat)
+#         }
+#       }
+#     }
+#     mix.results.acc$acc_pred_single[ii] <- list(acc_pred)
+#   }
+# }
+# 
+# # repeat for TC chemical library
+# for (ii in 1:nrow(mix.results.acc)){
+#   if (!(mix.results.all$m4id_mix[ii] %in% mix.info.tc$m4id_mix)) {
+#     mix.results.acc$acc_pred_single.tc[ii] <- NA
+#   } else {
+#     single_info <- single.info.tc[single.info.tc$m4id==mix.results.all$potent_sing_id.tc[ii],]
+#     single_dat <- mc5[m4id==single_info$m4id]
+#     # Bayesian credible interval
+#     indices <- sample(1:10000, num_sample, replace=F)
+#     acc_pred <- rep(NA,num_sample)
+#     for (ss in 1:num_sample){
+#       params <- single_info$bayesparams[[1]][indices[ss],]
+#       top_val <- single_curve_top(dat=single_dat,params=params)
+#       min_val <- single_curve_min(dat=single_dat,params=params) 
+#       y_err_samp <- single_dat$coff - rt(1,df=4)*params$sigma
+#       if (top_val<0){
+#         acc_pred[ss] <- NA
+#       } else {
+#         if (top_val<y_err_samp){
+#           if (single_dat$modl %in% c("poly1","pow","exp2","exp3")){
+#             acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,
+#                                              single_dat=single_dat)
+#           } else if(single_dat$modl=='poly2'){
+#             # all poly2 curves can extend except for the concave down increasing
+#             if (!(params$a<0 & params$b<0)){
+#               acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,single_dat=single_dat)
+#             } else{
+#               acc_pred[ss] <- 10000
+#             }
+#           } else {
+#             acc_pred[ss] <- 10000
+#           }
+#         } else if (min_val>y_err_samp){
+#           acc_pred[ss] <- -10000
+#         } else{
+#           acc_pred[ss] <- single_curve_inv(y=y_err_samp,params=params,
+#                                            single_dat=single_dat)
+#         }
+#       }
+#     }
+#     mix.results.acc$acc_pred_single.tc[ii] <- list(acc_pred)
+#   }
+# }
 ```
 
 Calculate intervals on observed mixture
