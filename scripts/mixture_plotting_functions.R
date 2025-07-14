@@ -8,6 +8,10 @@ plotlines.func <- function(index, mix_input, tc=FALSE){
     coff <- mix_input[which(mix_input$m4id_mix==mix.results.all$m4id_mix[ii]),]$coff
     mixdata <-   mc3 %>% filter(m3id %in% mc4_agg$m3id[which(mc4_agg$m4id==mix.results.all$m4id_mix[ii])])
     mixinfo <- mc5[which(mc5$m4id==mix.results.all$m4id_mix[ii]),]
+    # mixture concentration at top response
+    x_vals <- seq(min(mixdata$conc),max(mixdata$conc),length.out=800)
+    mix_model <- toxcast_model(dat=mixinfo,params=mixinfo,XX=x_vals)
+    mix_top_loc <- x_vals[which.max(mix_model)]
     if (tc == FALSE){
       # plot single curve from minimum to maximum concentration where the single component curve exists, as determined by the tested concentrations of that curve
       sing_max <- mc5[which(mc5$m4id==mix.results.all$potent_sing_id[ii]),]$conc_max
@@ -15,8 +19,9 @@ plotlines.func <- function(index, mix_input, tc=FALSE){
       sing_info <- subset(mix.results.all$potent_single[[ii]],conc>=sing_min & conc<=sing_max)
       # plot all of CA curve
       ca_info <- mix.results.all$ca_curve[[ii]]
-      # plot IA up to maximum response of IA curve
-      ia_info <- mix.results.all$ia_curve[[ii]][1:which.max(mix.results.all$ia_curve[[ii]]$resp),]
+      # plot IA up to maximum response of IA curve or concentration of maximum observed mixture response
+      ia_top_loc <- mix.results.all$ia_curve[[ii]]$conc[which.max(mix.results.all$ia_curve[[ii]]$resp)]
+      ia_info <- subset(mix.results.all$ia_curve[[ii]], conc<=max(mix_top_loc,ia_top_loc))
       plot_title <- "Modeled Response (Test Components)"
     } else {
       # plot single curve from minimum to maximum concentration where the single component curve exists, as determined by the tested concentrations of that curve
@@ -25,8 +30,9 @@ plotlines.func <- function(index, mix_input, tc=FALSE){
       sing_info <- subset(mix.results.all$potent_single.tc[[ii]],conc>=sing_min & conc<=sing_max)
       # plot all of CA curve
       ca_info <- mix.results.all$ca_curve.tc[[ii]]
-      # plot IA up to maximum response of IA curve
-      ia_info <- mix.results.all$ia_curve.tc[[ii]][1:which.max(mix.results.all$ia_curve.tc[[ii]]$resp),]
+      # plot IA up to maximum response of IA curve or concentration of maximum observed mixture response
+      ia_top_loc <- mix.results.all$ia_curve.tc[[ii]]$conc[which.max(mix.results.all$ia_curve.tc[[ii]]$resp)]
+      ia_info <- subset(mix.results.all$ia_curve.tc[[ii]], conc<=max(mix_top_loc,ia_top_loc))
       plot_title <- "Modeled Response (Legacy Components)"
     }
   } else {
@@ -102,19 +108,20 @@ plotint.func <- function(index,tc=FALSE){
       coff <- mix.info[which(mix.info$m4id_mix==mix.results.all$m4id_mix[ii]),]$coff
       mixdata <-   mc3 %>% filter(m3id %in% mc4_agg$m3id[which(mc4_agg$m4id==mix.results.all$m4id_mix[ii])])
       mixinfo <- mc5[which(mc5$m4id==mix.results.all$m4id_mix[ii]),]
+      # mixture concentration at top response
+      x_vals <- seq(min(mixdata$conc),max(mixdata$conc),length.out=800)
+      mix_model <- toxcast_model(dat=mixinfo,params=mixinfo,XX=x_vals)
+      mix_top_loc <- x_vals[which.max(mix_model)]
       # plot all of CA curve interval
       ca_info <- mix.results.all$ca_bootint[[ii]]
       # plot IA interval up to the IA model maximum
       ia_max_index <- min(which.max(mix.results.all$ia_bootint[[ii]]$X2.5.),
                           which.max(mix.results.all$ia_bootint[[ii]]$X97.5.))
-      ia_info <- mix.results.all$ia_bootint[[ii]][1:ia_max_index,]
+      ia_info <- mix.results.all$ia_bootint[[ii]]
       # plot single curve interval from minimum to maximum concentration where the single component curve exists, as determined by the tested concentrations of that curve
       sing_max <- mc5[which(mc5$m4id==mix.results.all$potent_sing_id[ii]),]$conc_max
       sing_min <- mc5[which(mc5$m4id==mix.results.all$potent_sing_id[ii]),]$conc_min
       single_info <- subset(mix.results.all$single_bootint[[ii]],conc>=sing_min & conc<=sing_max)
-      # single_max_index <- min(which.max(mix.results.all$single_bootint[[ii]]$X2.5.),
-      #                         which.max(mix.results.all$single_bootint[[ii]]$X97.5.))
-      # single_info <- mix.results.all$single_bootint[[ii]][1:single_max_index,]
       plot_title <- "Bootstrap Intervals (Test Components)"
     } else {
       make_plot <- FALSE
@@ -128,20 +135,21 @@ plotint.func <- function(index,tc=FALSE){
       coff <- mix.info.tc[which(mix.info.tc$m4id_mix==mix.results.all$m4id_mix[ii]),]$coff
       mixdata <-   mc3 %>% filter(m3id %in% mc4_agg$m3id[which(mc4_agg$m4id==mix.results.all$m4id_mix[ii])])
       mixinfo <- mc5[which(mc5$m4id==mix.results.all$m4id_mix[ii]),]
+      # mixture concentration at top response
+      x_vals <- seq(min(mixdata$conc),max(mixdata$conc),length.out=800)
+      mix_model <- toxcast_model(dat=mixinfo,params=mixinfo,XX=x_vals)
+      mix_top_loc <- x_vals[which.max(mix_model)]
       # plot all of CA interval
       ca_info <- mix.results.all$ca_bootint.tc[[ii]]
       # plot IA interval up to the IA maximum
       ia_max_index <- min(which.max(mix.results.all$ia_bootint.tc[[ii]]$X2.5.),
                           which.max(mix.results.all$ia_bootint.tc[[ii]]$X97.5.))
-      ia_info <- mix.results.all$ia_bootint.tc[[ii]][1:ia_max_index,]
+      # ia_info <- mix.results.all$ia_bootint.tc[[ii]][1:ia_max_index,]
+      ia_info <- mix.results.all$ia_bootint.tc[[ii]]
       # plot single curve interval from minimum to maximum concentration where the single component curve exists, as determined by the tested concentrations of that curve
       sing_max <- mc5[which(mc5$m4id==mix.results.all$potent_sing_id.tc[ii]),]$conc_max
       sing_min <- mc5[which(mc5$m4id==mix.results.all$potent_sing_id.tc[ii]),]$conc_min
       single_info <- subset(mix.results.all$single_bootint.tc[[ii]],conc>=sing_min & conc<=sing_max)
-      
-      # single_max_index <- min(which.max(mix.results.all$single_bootint.tc[[ii]]$X2.5.),
-      #                         which.max(mix.results.all$single_bootint.tc[[ii]]$X97.5.))
-      # single_info <- mix.results.all$single_bootint.tc[[ii]][1:single_max_index,]
       plot_title <- "Bootstrap Intervals (Legacy Components)"
     } else {
       make_plot <- FALSE
@@ -171,12 +179,14 @@ plotint.func <- function(index,tc=FALSE){
     ca_info$X97.5. <- ifelse(ca_info$X97.5.<=0,1E-50,ca_info$X97.5.)
     # ca_info$X97.5. <- ifelse(ca_info$X97.5>1000,max(mixdata$conc),ca_info$X97.5.)
     # remove negative values from CA lower curve
-    ia_info <- subset(ia_info,!is.na(X2.5.) & !is.na(X97.5.) & (conc>0) & (conc<=1000))
+    # ia_info <- subset(ia_info,!is.na(X2.5.) & !is.na(X97.5.) & (conc>0) & (conc<=1000))
+    max_ia_conc <- max(ia_info$conc[ia_max_index],mix_top_loc)
+    ia_info <- subset(ia_info, conc<=max_ia_conc & !is.na(X2.5.) & !is.na(X97.5.) & (conc>0))
+    
     mix_int <- subset(mix.results.all$mix_bootint[[ii]],
                       conc>=lower_limit & conc<=upper_limit)
     single_info <- subset(single_info, !(is.na(X2.5.)) & !(is.na(X97.5.)))
-    # single_info <- subset(single_info, X2.5.<= norm_factor & X97.5.<= norm_factor)
-    # single_info <- subset(single_info,conc<= min(mix_int$conc[which.max(mix_int$X2.5.)],mix_int$conc[which.max(mix_int$X97.5.)]))
+
     p1 <- ggplot() +
       scale_x_log10(labels = label_number(drop0trailing = TRUE))+
       coord_cartesian(xlim=c(lower_limit,upper_limit))+
