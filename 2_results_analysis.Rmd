@@ -23,7 +23,8 @@ library(scales)
 library(grid)
 
 # set up connections to ToxCast database
-tcplConf("_dataminer", pass="pass", db="prod_internal_invitrodb_v4_2", drvr="MySQL", host="ccte-mysql-res.dmap-prod.aws.epa.gov")
+# user input needed
+tcplConf(" ", pass=" ", db="prod_internal_invitrodb_v4_2", drvr=" ", host=" ")
 tcplConfList()
 
 # import scripts with functions
