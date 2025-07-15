@@ -1,11 +1,13 @@
 ---
-title: "Mixtures Analysis Summary"
+title: "Mathematical Modeling of Mixtures Analysis Example"
 author: "Rachel Broughton"
-date: "2025-05-12"
+date: "2025-07-15"
 output: html_document
 ---
-# Setup Environment
-```{r setup, include=FALSE,echo=FALSE,message=FALSE}
+# Setup Environment {.tabset}
+
+## Load Packages
+```{r setup, results="hide", message=FALSE}
 rm(list = ls())
 # load packages
 library(tidyverse)
@@ -19,19 +21,22 @@ library(grid)
 library(cowplot)
 library(scales)
 
-# set up connections to ToxCast database
-tcplConf("_dataminer", pass="pass", db="prod_internal_invitrodb_v4_2", drvr="MySQL", host="ccte-mysql-res.dmap-prod.aws.epa.gov")
-tcplConfList()
-
 # import scripts with functions
 source("./scripts/curve_fitting_functions.R")
 source("./scripts/mixture_model_functions.R")
 source("./scripts/mixture_plotting_functions.R")
 ```
 
-# Load Data for example
+Set up connections to ToxCast database
+```{r,include=FALSE, results="hide", message=FALSE}
+# set up connections to ToxCast database
+tcplConf("", pass="", db="prod_internal_invitrodb_v4_2", drvr="", host="")
+tcplConfList()
+```
 
-```{r}
+## Load Data for example
+
+```{r, results="hide"}
 
 # load test dataset spids
 load("./input/mixture_spids.Rdata")
@@ -51,23 +56,6 @@ ctot_mix <- rowsum(mixtures_key$ci_mix, as.integer(gl(nrow(mixtures_key), 2, nro
 mixtures_key$ctot_mix <- rep(ctot_mix, each=2)
 # compute concentration fraction of individual components in stock mixture
 mixtures_key <- mixtures_key %>% mutate(cfrac_mix = ci_mix/ctot_mix)
-
-# # load all mc5 data for Attagene endpoints
-# mc5_attg_endpts <- tcplPrepOtpt(tcplLoadData(lvl=5, type = 'mc', fld='aeid',val=c(63:144)))
-# # filter mc5 by tcplSubset selection for selecting legacy data
-# tc_mc5_notmix <- mc5_attg_endpts %>% filter(!(spid %in% spids))
-# setDT(tc_mc5_notmix)
-# tc_mc5_notmix_filter <- tcplSubsetChid(tc_mc5_notmix)
-# 
-# mc5.test <- mc5_attg_endpts %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.y & (spid %in% spids))
-# mc5.mixture <- mc5_attg_endpts %>% filter(dsstox_substance_id %in% mixtures_key$DTXSID.x)
-# 
-# mc5.legacy <- data.frame(matrix(NA,nrow=nrow(mc5.test), ncol=ncol(tc_mc5_notmix_filter)))
-# colnames(mc5.legacy) <- colnames(tc_mc5_notmix_filter)
-# for (ii in 1:nrow(mc5.test)){
-#   mc5.legacy[ii,] <- tc_mc5_notmix_filter %>% filter(dsstox_substance_id==mc5.test$dsstox_substance_id[ii] & aeid==mc5.test$aeid[ii])
-# }
-# m4ids_all <- c(mc5.test$m4id,mc5.mixture$m4id,mc5.legacy$m4id)
 
 # load m4id's for mixtures, test components, and legacy components
 load("./input/m4ids_all.Rdata")
@@ -93,13 +81,8 @@ load("./output/fit_quality.Rdata")
 
 ```
 
-# Single Chemical Components
-## Fit with tcplfit2
-Best fit concentration-response from tcplfit2 obtained via maximum likelihood estimation (MLE)
-Concentration-response is in the invitrodb database and curve fit information is stored in mc5 of the ToxCast pipeline
-
-Load concentration-response information from test dataset single components
-```{r}
+## Load concentration-response from test dataset single components and mixture
+```{r, results="hide"}
 # select example mixture, based on m4id
 # ex_index <- 154
 m4id_mix <- 12663243
@@ -118,14 +101,6 @@ ci_frac <- mixtures_key[mixtures_key$DTXSID.x == mc5[m4id==12663243,]$dsstox_sub
 cfrac_1 <- ci_frac[1]
 cfrac_2 <- ci_frac[2]
 
-# calculate response for minimum to maximum tested concentrations based on tcplfit2 best fit model and parameters
-curve1_plot <- data.frame(x=seq(min(comp1_data$conc),max(comp1_data$conc),length.out=300),
-                     resp=toxcast_model(dat=component1,params=component1,
-                                        XX=seq(min(comp1_data$conc),max(comp1_data$conc),length.out=300)))
-curve2_plot <- data.frame(x=seq(min(comp2_data$conc),max(comp2_data$conc),length.out=300),
-                     resp=toxcast_model(dat=component2,params=component2,
-                                        XX=seq(min(comp2_data$conc),max(comp2_data$conc),length.out=300)))
-
 # Define normalization factor to normalize curves to the maximum top value
 # across entire endpoint to be able to compute and compare mixture models
 # pull all mc5 top response values for the Attagene endpoint of this example
@@ -138,8 +113,23 @@ mix_dat <- mc3 %>% filter(m3id %in% mc4_agg$m3id[which(mc4_agg$m4id==m4id_mix)])
 
 ```
 
+# Single Chemical Components {.tabset}
+
+## Fit with tcplfit2
+
+Best fit concentration-response from tcplfit2 obtained via maximum likelihood estimation (MLE)
+Concentration-response is in the invitrodb database and curve fit information is stored in mc5 of the ToxCast pipeline
+
 Plot test dataset single components
-```{r}
+```{r, results="hide"}
+# calculate response for minimum to maximum tested concentrations based on tcplfit2 best fit model and parameters
+curve1_plot <- data.frame(x=seq(min(comp1_data$conc),max(comp1_data$conc),length.out=300),
+                     resp=toxcast_model(dat=component1,params=component1,
+                                        XX=seq(min(comp1_data$conc),max(comp1_data$conc),length.out=300)))
+curve2_plot <- data.frame(x=seq(min(comp2_data$conc),max(comp2_data$conc),length.out=300),
+                     resp=toxcast_model(dat=component2,params=component2,
+                                        XX=seq(min(comp2_data$conc),max(comp2_data$conc),length.out=300)))
+
 # set x-axis limits based on mixture data
 lower_limit <- min(mix_dat$conc)
 upper_limit <- max(mix_dat$conc)
@@ -179,9 +169,11 @@ plot_grid(p1,p2)
 comp1_bootparams <- curve_bootstrap(curve.info=component1, boot_num=1000,type="single")
 comp2_bootparams <- curve_bootstrap(curve.info=component2, boot_num=1000,type="single")
 
-indices <- sample(1:1000,500)
+num_plot <- 200
+
+indices <- sample(1:1000,num_plot)
 p3 <- p_outline
-  for(ii in 1:500){
+  for(ii in 1:num_plot){
   XX <- seq(min(comp1_data$conc),max(comp1_data$conc),length.out=300)
   boot_curve <- toxcast_model(dat=component1,params=comp1_bootparams[indices[ii],],XX=XX)
   p3 <- p3  +
@@ -194,9 +186,9 @@ p3 <- p3 +
   labs(title="Bootstrapped Component 1", subtitle = paste0(component1$chnm, ", ", component1$aenm)) +
   theme(plot.title=element_text(size=16,hjust=0.5, face="bold", color="#D55E00")) 
 
-indices <- sample(1:1000,500)
+indices <- sample(1:1000,num_plot)
 p4 <- p_outline
-  for(ii in 1:500){
+  for(ii in 1:num_plot){
   XX <- seq(min(comp2_data$conc),max(comp2_data$conc),length.out=300)
   boot_curve <- toxcast_model(dat=component2,params=comp2_bootparams[indices[ii],],XX=XX)
   p4 <- p4  +
@@ -221,9 +213,9 @@ comp1_bayesparams <- bayes_curve(curve.info=component1,n_iter=10000,n_burn=10000
 comp2_bayesparams <- bayes_curve(curve.info=component2,n_iter=10000,n_burn=10000,
                                   type="single",poly2_correct=FALSE)
 
-indices <- sample(1:10000,500)
+indices <- sample(1:10000,num_plot)
 p5 <- p_outline
-  for(ii in 1:500){
+  for(ii in 1:num_plot){
   XX <- seq(min(comp1_data$conc),max(comp1_data$conc),length.out=300)
   curve1 <- toxcast_model(dat=component1,params=comp1_bayesparams[indices[ii],],XX=XX)
   p5 <- p5  +
@@ -236,9 +228,9 @@ p5 <- p5 +
   labs(title="Bayesian Component 1", subtitle = paste0(component1$chnm, ", ", component1$aenm)) +
   theme(plot.title=element_text(size=16,hjust=0.5, face="bold", color="#D55E00")) 
 
-indices <- sample(1:10000,500)
+indices <- sample(1:10000,num_plot)
 p6 <- p_outline
-  for(ii in 1:500){
+  for(ii in 1:num_plot){
   XX <- seq(min(comp2_data$conc),max(comp2_data$conc),length.out=300)
   curve2 <- toxcast_model(dat=component2,params=comp2_bayesparams[indices[ii],],XX=XX)
   p6 <- p6  +
@@ -255,58 +247,39 @@ plot_grid(p5,p6)
 ```
 
 
-# Concentration Addition (CA)
+# Concentration Addition (CA) {.tabset}
+
 ## Model
+
+The CA model for a mixture made up of 2 chemical components is written as:
 $$
 ACy_{mix} = (\frac{q_1}{ACy_{1}}+\frac{q_2}{ACy_{2}})^{-1}
 $$
+Here, $ACy_{mix}$ is the activity concentration of the mixture at a given response y and $ACy_{1}$ and $ACy_{1}$ are the activity concentrations of the individual components 1 and 2 for a given response y when applied singly and $q_i$ is the concentration fraction of the component in the mixture.
+
+An extrapolated CA model from (Scholze et al. 2014) [https://doi.org/10.1371/journal.pone.0088808] is used to implement the CA model up to the maximum response (top) of the more efficacious single component.
+
 If $0.7*top_2 < y < top_1$, then
 $$
 ACy_{mix} = \frac{ACy_{1}}{q_1} \cdot (1-TU_2)
 $$
-## Example of predicted models
 
-CA model derived from tcplfit2 best fit response
-```{r}
+If $0.7*top_1 < y < top_2$, then
+$$
+ACy_{mix} = \frac{ACy_{2}}{q_2} \cdot (1-TU_1)
+$$
+
+
+## CA model from tcplfit2 best fit response
+```{r, results="hide"}
 ex_index <- which(mix.results.all$m4id_mix == m4id_mix)
 cutoff <- component1$coff
-
-# CA model derived from tcplfit2 best fit response
-p1_og <- plotlines.func(index=ex_index,mix_input=mix.info,tc=FALSE) +
-  guides(color=guide_legend(override.aes=list(lwd=1,size=2))) + 
-  theme_bw(base_size=10) + 
-  labs(title="CA Modeled Response") +
-  theme(legend.position="none", axis.text = element_text(color="black"),
-        plot.margin=unit(c(2,5,2,5), "mm"),
-        plot.title = element_text(size=11,hjust=0.5, face="bold"))
-
-p1_og$layers[[6]] <- NULL
-p1_og$layers[[5]] <- NULL
-p1_og$layers[[4]] <- NULL
-p1_og$layers[[3]] <- NULL
-# p1_og$layers[[2]] <- NULL
-p1_og$layers[[1]] <- NULL
-
-p1_og <- p1_og +
-  geom_hline(yintercept=component1$coff/norm_factor, linetype="dashed", color="gray34",linewidth=1)
-p1 <- ggplot_build(p1_og)
-p1$data[[1]]$linewidth <- 1.5
-
-p1_ca <- ggplot_gtable(p1)
-# plot(p1_new)
-
-```
-
-CA model from bootstrap resampling 
-```{r}
-## Bootstrap CA implementation
 num_pts <- 200
-num_sample <- 1000
 
 # get component 1 minimum and maximum response of tcplfit2 best fit response
 comp1_min <- single_curve_min(dat=component1,params=component1)
 comp1_top <- single_curve_top(dat=component1,params=component1) # top within concentration range, not true top
-# set to small positive number if the minimum is negative. This happend for a concave up poly2 curve 
+# set to small positive number if the minimum is negative
 if (comp1_min <= 0){
   comp1_min <- 1E-20
 }
@@ -317,28 +290,49 @@ if (comp2_min <= 0){
   comp2_min <- 1E-20
 }
 # set-up y-values to calculate CA line and x-values to calculate IA model
-if(component1$hitc>=0.9 & component2$hitc<0.9){
-  # put response values from minimum response (~0) to the cutoff on a log scale and the rest with even spacing to get good coverage of points
-  y_vals <- c(10^seq(log10(comp1_min),log10(component1$coff),length.out=(2*num_pts/3)),
-              seq(component1$coff+0.01,comp1_top,length.out=(num_pts/3)))
-  # set activity hitcalls as true/false for faster evaluation
-  condition1 <- TRUE
-  condition2 <- FALSE
-}else if(component2$hitc>=0.9 & component1$hitc<0.9){
-  # put response values from minimum response (~0) to the cutoff on a log scale and the rest with even spacing to get good coverage of points
-  y_vals <- c(10^seq(log10(comp2_min),log10(component1$coff),length.out=(2*num_pts/3)),
-              seq(component1$coff+0.01,comp2_top,length.out=(num_pts/3)))
-  # set activity hitcalls as true/false for faster evaluation
-  condition1 <- FALSE
-  condition2 <- TRUE
-  }else if(component1$hitc>=0.9 & component2$hitc>=0.9){
-  # put response values from minimum response (~0) to the cutoff on a log scale and the rest with even spacing to get good coverage of points
-  y_vals <- c(10^seq(log10(max(comp1_min,comp2_min)),log10(component1$coff),length.out=(2*num_pts/3)),
-              seq(component1$coff+0.01,max(comp1_top,comp2_top),length.out=(num_pts/3)))
-  # set activity hitcalls as true/false for faster evaluation
-  condition1 <- TRUE
-  condition2 <- TRUE
-}
+# both components are active, so set condition to TRUE and define y-values based on both components
+condition1 <- TRUE
+condition2 <- TRUE
+# put response values from minimum response (~0) to the cutoff on a log scale and the rest with even spacing to get good coverage of points
+y_vals <- c(10^seq(log10(max(comp1_min,comp2_min)),log10(component1$coff),
+                   length.out=(2*num_pts/3)),
+            seq(component1$coff+0.01,max(comp1_top,comp2_top),
+                length.out=(num_pts/3)))
+
+# compute full curve
+ca_concs <- ca_full_conc(YY=y_vals,comp1=component1,comp2=component2,params1=component1,
+                         params2=component2,cfrac1=cfrac_1,cfrac2=cfrac_2,
+                         condition1=condition1,condition2=condition2,sample=FALSE)
+ca_plot <- data.frame(conc=ca_concs,resp=y_vals)
+# compute ACC only
+acc_ca <- ca_point_conc(YY=component1$coff,comp1=component1,comp2=component2,
+                        params1=component1,params2=component2,
+                        cfrac1=cfrac_1,cfrac2=cfrac_2,
+                        condition1=condition1,condition2=condition2,sample=FALSE)
+
+p_outline <- ggplot() +
+  scale_x_log10(labels = label_number(drop0trailing = TRUE)) +
+  coord_cartesian(xlim=c(lower_limit,upper_limit))+
+  labs(x=expression(paste("Concentration [",mu, "M]")), y="Normalized Response") +
+  theme_bw(base_size=10) +
+  theme(axis.text = element_text(color="black"),
+        plot.margin=unit(c(2,5,2,5), "mm"),
+        plot.title = element_text(size=11,hjust=0.5, face="bold")) 
+
+p1_ca <- p_outline +
+  geom_line(data=subset(ca_plot,conc>0),aes(x=conc,y=resp),
+            color="#ffb000",linewidth=1)+
+  labs(title="CA Modeled Response") +
+  geom_hline(yintercept=component1$coff/norm_factor, linetype="dashed", color="gray34",linewidth=1)
+
+```
+
+## CA model from bootstrap resampling 
+```{r, results="hide"}
+## Bootstrap CA implementation
+num_pts <- 200
+num_sample <- 1000
+
 # compute full curve CA bootstrap 95% confidence interval
 num_cols <- min(nrow(comp1_bootparams),nrow(comp2_bootparams))
 ca_boot <- sapply(1:num_cols,ca_full_conc,YY=y_vals,comp1=component1,comp2=component2,
@@ -350,23 +344,14 @@ ca_mean <- apply(ca_boot,1,mean,na.rm=TRUE)
 ca_bootint_ex <- data.frame(resp=y_vals,mean=ca_mean,t(ca_bootint))
 
 # Compute boostrap samples around ACC only
-acc_boot_ca_ex <- sapply(1:num_cols,ca_point_conc,YY=component1$coff,comp1=component1,
-                         comp2=component2,params1=comp1_bootparams,params2=comp2_bootparams,
+acc_boot_ca_ex <- sapply(1:num_cols,ca_point_conc,YY=component1$coff,
+                         comp1=component1,comp2=component2,
+                         params1=comp1_bootparams,params2=comp2_bootparams,
                          cfrac1=cfrac_1,cfrac2=cfrac_2,condition1=condition1,
                          condition2=condition2,sample=TRUE)
-p_outline <- ggplot() +
-  # scale_x_log10(labels = label_number(drop0trailing = TRUE),
-  #               limits= c(min(comp1_data$conc,comp2_data$conc),
-  #                         max(comp1_data$conc,comp2_data$conc)))+
-  scale_x_log10(labels = label_number(drop0trailing = TRUE)) +
-  coord_cartesian(xlim=c(lower_limit,upper_limit))+
-  labs(x=expression(paste("Concentration [",mu, "M]")), y="Normalized Response") +
-  theme_bw(base_size=10) +
-  theme(axis.text = element_text(color="black"),
-        plot.margin=unit(c(2,5,2,5), "mm")) 
 
 # set number of bootstrap curves to plot
-num_plot <- 500
+num_plot <- 100
 p2 <- p_outline +
   # plot 95% confidence interval
   geom_line(data=subset(ca_bootint_ex,X2.5.>=0), aes(x=X2.5.,y=resp/norm_factor),color="black",lwd=1)+
@@ -382,8 +367,7 @@ p2_ca <- p2 +
   geom_hline(yintercept=component1$coff/norm_factor, linetype="dashed", color="gray34",linewidth=1) +
   scale_color_manual(values=c(samples="#ffb000",interval="#b37b00"),labels=c(samples="Bootstrap Resamples",interval="95% Confidence Interval"))+
   labs(title="Bootstrapped CA") +
-  theme(plot.title = element_text(size=11,hjust=0.5, face="bold"),
-        legend.title=element_blank(),
+  theme(legend.title=element_blank(),
         legend.background = element_rect(fill=NA),
         legend.text = element_text(size=8),
         legend.justification = c(0,1),
@@ -395,12 +379,12 @@ p2_ca <- p2 +
 # print(p2)
 ```
 
-CA model from Bayesian Approach
-```{r}
+## CA model from Bayesian Approach
+```{r, results="hide"}
 ## Bayesian CA implementation
 num_pts <- 200
 num_sample <- 1000
-num_plot <- 50
+num_plot <- 100
 
 # use same component minimum/maximum and y-values as bootstrap approach
 indices <- sample(1:10000, num_sample, replace=F)
@@ -416,7 +400,12 @@ ca_bayesint_ex <- data.frame(resp=y_vals,mean=ca_mean,t(ca_bayesint))
 
 # compute CA Bayesian 95% prediction interval
 # y_vals_pred <- y_vals[((1:length(y_vals)) %%2)!=0]
-y_vals_pred <- y_vals
+# y_vals_pred <- y_vals
+# use fewer points because takes longer to calculate
+y_vals_pred <- c(10^seq(log10(max(comp1_min,comp2_min)),log10(component1$coff),
+                   length.out=(2*100/3)),
+            seq(component1$coff+0.01,max(comp1_top,comp2_top),
+                length.out=(100/3)))
 capred_lo <- rep(NA, length(y_vals_pred))
 capred_hi <- rep(NA, length(y_vals_pred))
 x_pred_ca <- matrix(NA,nrow=length(y_vals_pred),ncol=num_sample)
@@ -449,15 +438,15 @@ p3_ca <- p3 +
   geom_hline(yintercept=component1$coff/norm_factor, linetype="dashed", color="gray34",linewidth=1) +
   scale_color_manual(values=c(samples="#ffb000",interval="#b37b00"),labels=c(samples="Bayesian Posterior Predictions",interval="95% Credible Interval"))+
   labs(title="Bayesian Approach CA") +
-  theme(plot.title = element_text(size=11,hjust=0.5, face="bold"),
-        legend.title=element_blank(),
+  theme(legend.title=element_blank(),
         legend.background = element_rect(fill=NA),
         legend.text = element_text(size=8),
         legend.justification = c(0,1),
         legend.position = "inside",
         legend.position.inside=c(0.01,0.99),
         legend.key.width = unit(4, "mm"),
-        legend.key.height = unit(2, "mm")) + 
+        legend.key.height = unit(2, "mm"),
+        legend.margin = margin(0.1,0.1,0.1,0.1, unit='mm')) + 
   guides(color = guide_legend(override.aes = list(linewidth = 3)))
 # print(p3)
 
@@ -476,109 +465,90 @@ for(jj in 1:length(y_vals_pred)){
 p4_ca <- p4_ca +
   geom_line(data=subset(ca_predint_ex,lo>=0), aes(x=lo,y=resp/norm_factor,color="interval"),lwd=1.5)+
   geom_line(data=subset(ca_predint_ex,hi<=1000), aes(x=hi,y=resp/norm_factor,color="interval"),lwd=1.25) +
-  # geom_point(data=subset(ca_predint_ex,lo>=0), aes(x=lo,y=resp/norm_factor,color="interval"),shape=108, size=4)+
-  # geom_point(data=subset(ca_predint_ex,hi<=1000), aes(x=hi,y=resp/norm_factor,color="interval"),shape=108, size=4) +
   geom_hline(yintercept=component1$coff/norm_factor, linetype="dashed", color="gray34",linewidth=1) +
   scale_color_manual(values=c(samples="#ffb000",interval="#b37b00"),labels=c(samples="Bayesian Posterior Predictions",interval="95% Prediction Interval"))+
   labs(title="Bayesian Prediction Interval CA") +
-  theme(plot.title = element_text(size=11,hjust=0.5, face="bold"),
-        legend.title=element_blank(),
+  theme(legend.title=element_blank(),
         legend.background = element_rect(fill=NA),
         legend.text = element_text(size=8),
         legend.justification = c(0,1),
         legend.position = "inside",
         legend.position.inside=c(0.01,0.99),
         legend.key.width = unit(4, "mm"),
-        legend.key.height = unit(2, "mm")) + 
+        legend.key.height = unit(2, "mm"),
+        legend.margin = margin(0.1,0.1,0.1,0.1, unit='mm')) + 
   guides(color = guide_legend(override.aes = list(linewidth = 3)))
 ```
+
+## Plots 
 
 Plot each fitting approach used to derive the CA model. Bootstrapped and Bayesian approaches are plotted as the curve samples and the 95% interval around the concentration-response. Note that the Bayesian posterior predictive samples are calculated and plotted as concentrations as a function of response
 
 ```{r}
 # plot all together
-# plot(p1_ca)
-# print(p2_ca)
-# print(p3_ca)
-# print(p4_ca)
 plot_grid(p1_ca,p2_ca,p3_ca,p4_ca,nrow=2,ncol=2)
 ```
 
-# Independent Action (IA)
+# Independent Action (IA) {.tabset}
 
 ## Model
 
-$$ A_{mix}(c_{mix}) = 1 - \prod_{i=1}^{2}(1-A_i(q_i*c_{mix})) $$
+The IA model is calculated as
 
-## Example
-IA model derived from tcplfit2 best fit response
-```{r}
+$$ A_{mix}(c_{mix}) = 1 - \prod_{i=1}^{N}(1-A_i(q_i*c_{mix})) $$
+where $A_mix$ is the predicted activity, or response, for a given concentration $c_{mix}$, $A_i$ is the single component response when applied singly at a concentration of $q_i*c_{mix}$, and $q_i$ is the concentration fraction of the component in the mixture.  
 
+
+## IA model from tcplfit2 best fit response
+```{r, results="hide"}
+# both components are active, so set condition to TRUE and define x-values based on both components
+condition1 <- TRUE
+condition2 <- TRUE
+x_vals <- 10^seq(log10(mc5[m4id==m4id_mix,]$conc_min),
+                       log10(min(component1$conc_max/cfrac_1,component2$conc_max/cfrac_2)),
+                       length.out=num_pts)
 # IA model derived from tcplfit2 best fit response
-p_ia <- plotlines.func(index=ex_index,mix_input=mix.info,tc=FALSE) +
-  guides(color=guide_legend(override.aes=list(lwd=2,size=4))) + 
-  theme_bw(base_size=10) + 
-  labs(title="IA Modeled Response") +
-  theme(legend.position="none", axis.text = element_text(color="black"),
-        plot.margin=unit(c(2,5,2,5), "mm"),
-        plot.title = element_text(size=11,hjust=0.5, face="bold"))
+ia_resps <- ia_full_resp(val=x_vals,comp1=component1,comp2=component2,
+                         params1=component1,params2=component2,
+                         cfrac1=cfrac_1,cfrac2=cfrac_2,
+                         condition1=condition1,condition2=condition2,
+                         norm_factor=norm_factor,sample=FALSE)
+ia_plot <- data.frame(conc=x_vals,resp=ia_resps)
+# calculate ACC only from IA
+# cutoff IA at top (don't include biphasic part)
+ia_resps_acc <- ia_resps[1:which.max(ia_resps)]
+x_vals_eval <- x_vals[1:which.max(ia_resps)]
+if (max(ia_resps_acc,na.rm=TRUE)<(component1$coff/norm_factor)){
+  acc_ia <- 10000
+} else if (min(ia_resps_acc,na.rm=TRUE)>(component1$coff/norm_factor)){
+  acc_ia <- -10000
+} else {
+  acc_ia <- approx(x=ia_resps_acc,y=x_vals_eval,xout=component1$coff/norm_factor, 
+                   rule=1,ties="ordered")[[2]]
+}
 
-p_ia$layers[[6]] <- NULL
-p_ia$layers[[5]] <- NULL
-p_ia$layers[[4]] <- NULL
-# p_ia$layers[[3]] <- NULL
-p_ia$layers[[2]] <- NULL
-p_ia$layers[[1]] <- NULL
-p_ia <- p_ia +
-  geom_hline(yintercept=component1$coff/norm_factor, linetype="dashed", color="gray34",linewidth=1)
-p1_ia <- ggplot_build(p_ia)
-p1_ia$data[[1]]$linewidth <- 1.5
-p1_ia$data[[1]]$linetype <- 1
-
-p1_ia <- ggplot_gtable(p1_ia)
-# plot(p1_ia)
-
-```
-
-IA model bootstrap implementation
-```{r}
 p_outline <- ggplot() +
-  # scale_x_log10(labels = label_number(drop0trailing = TRUE),
-  #               limits= c(min(comp1_data$conc,comp2_data$conc),
-  #                         max(comp1_data$conc,comp2_data$conc)))+
   scale_x_log10(labels = label_number(drop0trailing = TRUE)) +
   coord_cartesian(xlim=c(lower_limit,upper_limit))+
   labs(x=expression(paste("Concentration [",mu, "M]")), y="Normalized Response") +
   theme_bw(base_size=10) +
   theme(axis.text = element_text(color="black"),
-        plot.margin=unit(c(2,5,2,5), "mm")) 
+        plot.margin=unit(c(2,5,2,5), "mm"),
+        plot.title = element_text(size=11,hjust=0.5, face="bold")) 
+p1_ia <- p_outline +
+  geom_line(data=data.frame(conc=x_vals,resp=ia_resps), aes(x=conc,y=resp),
+            color="#006299",linewidth=1) +
+  labs(title="IA Modeled Response") +
+  geom_hline(yintercept=component1$coff/norm_factor,
+             linetype="dashed", color="gray34",linewidth=1)
 
+```
+
+## IA model bootstrap implementation
+```{r, results="hide"}
 ## Bootstrap CA implementation
 num_pts <- 200
 num_sample <- 1000
-
-# set-up y-values to calculate CA line and x-values to calculate IA model
-if(component1$hitc>=0.9 & component2$hitc<0.9){
-  x_vals <- 10^seq(log10(mc5[m4id==m4id_mix,]$conc_min),
-                   log10(component1$conc_max/cfrac_1),length.out=num_pts)
-  # set activity hitcalls as true/false for faster evaluation
-  condition1 <- TRUE
-  condition2 <- FALSE
-}else if(component2$hitc>=0.9 & component1$hitc<0.9){
-  x_vals <- 10^seq(log10(mc5[m4id==m4id_mix,]$conc_min),
-                   log10(component2$conc_max/cfrac_2),length.out=num_pts)
-  # set activity hitcalls as true/false for faster evaluation
-  condition1 <- FALSE
-  condition2 <- TRUE
-  }else if(component1$hitc>=0.9 & component2$hitc>=0.9){
-    x_vals <- 10^seq(log10(mc5[m4id==m4id_mix,]$conc_min),
-                       log10(min(component1$conc_max/cfrac_1,component2$conc_max/cfrac_2)),
-                       length.out=num_pts)
-  # set activity hitcalls as true/false for faster evaluation
-  condition1 <- TRUE
-  condition2 <- TRUE
-  }
-
 # compute full curve IA bootstrap 95% confidence interval
 ia_boot <- sapply(c(1:min(nrow(comp1_bootparams),nrow(comp2_bootparams))),ia_full_resp,
                   val=x_vals,comp1=component1,comp2=component2,
@@ -590,10 +560,29 @@ ia_bootint <- apply(ia_boot, 1, quantile, prob=c(0.025,0.975), na.rm=TRUE)
 ia_mean <- apply(ia_boot,1,mean,na.rm=TRUE)
 ia_bootint_ex <- data.frame(conc=x_vals,mean=ia_mean,t(ia_bootint))
 # Compute bootstrap samples around ACC only
-
+acc_boot_ia <- c()
+for (ss in 1:num_sample){
+  if (sum(!is.na(ia_boot[,ss]))==0){
+    acc_boot_ia_temp <- NA
+  } else{
+    # cutoff IA at top (don't include biphasic part)
+    ia_boot_temp <- ia_boot[,ss][1:which.max(ia_boot[,ss])]
+    x_vals_eval <- x_vals[1:which.max(ia_boot[,ss])]
+    if (max(ia_boot_temp ,na.rm=TRUE)<(component1$coff/norm_factor)){
+      acc_boot_ia_temp <- 10000
+    } else if (min(ia_boot,na.rm=TRUE)>(component1$coff/norm_factor)){
+      acc_boot_ia_temp <- -10000
+    } else {
+      acc_boot_ia_temp <- approx(x=ia_boot_temp, y=x_vals_eval, 
+                                 xout=component1$coff/norm_factor, 
+                                 rule=1,ties="ordered")[[2]]
+    }
+  }
+  acc_boot_ia <- append(acc_boot_ia,acc_boot_ia_temp)
+}
 
 # set number of bootstrap curves to plot
-num_plot <- 50
+num_plot <- 100
 p_ia_2 <- p_outline
   # plot 95% confidence interval
 
@@ -608,8 +597,7 @@ p_ia_2 <- p_ia_2 +
   geom_hline(yintercept=component1$coff/norm_factor, linetype="dashed", color="gray34",linewidth=1) +
   scale_color_manual(values=c(samples="#006299",interval="#00314d"),labels=c(samples="Bootstrap Resamples",interval="95% Confidence Interval"))+
   labs(title="Bootstrapped IA") +
-  theme(plot.title = element_text(size=11,hjust=0.5, face="bold"),
-        legend.title=element_blank(),
+  theme(legend.title=element_blank(),
         legend.background = element_rect(fill=NA),
         legend.text = element_text(size=8),
         legend.justification = c(0,1),
@@ -618,11 +606,11 @@ p_ia_2 <- p_ia_2 +
         legend.key.width = unit(4, "mm"),
         legend.key.height = unit(2, "mm")) + 
   guides(color = guide_legend(override.aes = list(linewidth = 2)))
-# print(p_ia_2)
 ```
 
-IA model Bayesian implementation
-```{r}
+## IA model Bayesian implementation
+
+```{r, results="hide"}
 # compute full curve IA Bayesian 95% credible interval
 indices <- sample(1:10000, num_sample, replace=F)
 ia_bayes <- sapply(indices,ia_full_resp,
@@ -668,7 +656,7 @@ for (ss in 1:num_sample){
 
 
 # set number of Bayesian curves to plot
-num_plot <- 50
+num_plot <- 100
 # plot 95% credible interval
 p_ia_3 <- p_outline
 
@@ -683,8 +671,7 @@ p_ia_3 <- p_ia_3 +
   geom_hline(yintercept=component1$coff/norm_factor, linetype="dashed", color="gray34",linewidth=1) +
   scale_color_manual(values=c(samples="#006299",interval="#00314d"),labels=c(samples="Bayesian Samples",interval="95% Credible Interval"))+
   labs(title="Bayesian Approach IA") +
-  theme(plot.title = element_text(size=11,hjust=0.5, face="bold"),
-        legend.title=element_blank(),
+  theme(legend.title=element_blank(),
         legend.background = element_rect(fill=NA),
         legend.text = element_text(size=8),
         legend.justification = c(0,1),
@@ -709,8 +696,126 @@ p_ia_4 <- p_ia_4 +
   geom_hline(yintercept=component1$coff/norm_factor, linetype="dashed", color="gray34",linewidth=1) +
   scale_color_manual(values=c(samples="#CDEDFF",interval="#006299"),labels=c(samples="Bayesian Predictive Samples",interval="95% Prediction Interval"))+
   labs(title="Bayesian Prediction Interval IA") +
-  theme(plot.title = element_text(size=11,hjust=0.5, face="bold"),
-        legend.title=element_blank(),
+  theme(legend.title=element_blank(),
+        legend.background = element_rect(fill=NA),
+        legend.text = element_text(size=8),
+        legend.justification = c(0,1),
+        legend.position = "inside",
+        legend.position.inside=c(0.01,0.99),
+        legend.key.width = unit(4, "mm"),
+        legend.key.height = unit(2, "mm"),
+        legend.margin = margin(0.1,0.1,0.1,0.1, unit='mm')) + 
+  guides(color = guide_legend(override.aes = list(linewidth = 2)))
+# print(p_ia_4)
+  
+```
+
+## Plot all IA methods together
+```{r}
+plot_grid(p1_ia,p_ia_2,p_ia_3,p_ia_4,nrow=2,ncol=2)
+```
+
+# Most Potent Single Component (MP) {.tabset}
+
+## Model
+
+Mixture is treated as being made up 100% of the most potent single chemical component. The most potent chemical component is selected as the component with the lower activity concentration at the cutoff (ACC), which is the selected point of departure.
+
+## MP model derived from tcplfit2 best fit response
+```{r, results="hide"}
+# select most potent single chemical based on ACC
+single_chems <- subset(mc5,m4id %in% c(m4id_1,m4id_2))
+potent_sing <- single_chems[which.min(single_chems$acc),]
+# best fit to single component from tcplfit2
+x_vals <- seq(potent_sing$conc_min,potent_sing$conc_max, length.out=300)
+mp_curve <- toxcast_model(dat=potent_sing,params=potent_sing,XX=x_vals)
+mp_plot <- data.frame(conc=x_vals,resp=mp_curve)
+## acc of MP model
+acc_mp <- potent_sing$acc
+# Plot MP model
+p_outline <- ggplot() +
+  scale_x_log10(labels = label_number(drop0trailing = TRUE)) +
+  coord_cartesian(xlim=c(lower_limit,upper_limit))+
+  labs(x=expression(paste("Concentration [",mu, "M]")), y="Normalized Response") +
+  theme_bw(base_size=10) +
+  theme(
+        legend.position="none", axis.text = element_text(color="black"),
+        plot.margin=unit(c(2,5,2,5), "mm"),
+        plot.title = element_text(size=11,hjust=0.5, face="bold")) 
+p1_mp <- p_outline +
+  geom_line(data=data.frame(conc=x_vals,resp=mp_curve/norm_factor),aes(x=conc,y=resp),
+            color="#be548f",linewidth=1)+
+  geom_hline(yintercept=component1$coff/norm_factor, linetype="dashed", color="gray34",linewidth=1)+
+  theme(axis.text = element_text(color="black"))
+```
+
+## MP model bootstrap implementation
+```{r, results="hide"}
+## Bootstrap CA implementation
+num_pts <- 200
+num_sample <- 1000
+
+x_vals <- 10^seq(log10(0.01*potent_sing$conc_min),log10(3*potent_sing$conc_max),length.out=num_pts)
+# select most potent single chemical bootstrapped parameters
+if (which.min(single_chems$acc)==1){
+  bootparams <- comp1_bootparams
+} else {
+  bootparams <- comp2_bootparams
+}
+# bootstrap interval
+single_boot <- sapply(c(1:nrow(bootparams)), toxcast_model,
+                      dat=potent_sing,params=bootparams,
+                      XX=x_vals,sample=TRUE)
+single_bootint <- apply(single_boot, 1, quantile, prob=c(0.025,0.975), na.rm=TRUE)
+single_bootint_ex <- data.frame(conc=x_vals,t(single_bootint))
+# boostrap ACC only
+acc_boot_single <- rep(NA,nrow(bootparams))
+for (ss in 1:nrow(bootparams)){
+  params <- bootparams[ss,]
+  top_val <- single_curve_top(dat=potent_sing,params=params)
+  min_val <- min(single_boot[,ss],na.rm=T)
+  if (top_val<0){
+    acc_boot_single[ss] <- NA
+  } else {
+    if (top_val<potent_sing$coff){
+      if (potent_sing$modl %in% c("poly1","pow","exp2","exp3")){
+        acc_boot_single[ss] <- single_curve_inv(y=potent_sing$coff,params=params,
+                                    single_dat=potent_sing)
+      } else if(potent_sing$modl=='poly2'){
+        # all poly2 curves can extend except for the concave down increasing
+        if (!(params$a<0 & params$b<0)){
+          acc_boot_single[ss] <- single_curve_inv(y=potent_sing$coff,
+                                      params=params,single_dat=potent_sing)
+        } else{
+          acc_boot_single[ss] <- 10000
+        }
+      } else {
+        acc_boot_single[ss] <- 10000
+      }
+    } else if (min_val>potent_sing$coff){
+      acc_boot_single[ss] <- -10000
+    } else{
+      acc_boot_single[ss] <- single_curve_inv(y=potent_sing$coff,params=params,single_dat=potent_sing)
+    }
+  }
+}
+
+# set number of bootstrap curves to plot
+num_plot <- 100
+p2_mp <- p_outline
+  # plot 95% confidence interval
+for(jj in 1:num_plot){
+  plot_data <- subset(data.frame(resp=single_boot[,jj],conc=x_vals),conc<=upper_limit)
+  p2_mp <- p2_mp +
+    geom_line(data=plot_data,aes(x=conc,y=resp/norm_factor,color="samples"),alpha=0.05)
+}
+p2_mp <- p2_mp +
+  geom_line(data=subset(single_bootint_ex,conc<=upper_limit), aes(x=conc,y=X2.5./norm_factor,color="interval"),lwd=1)+
+  geom_line(data=subset(single_bootint_ex,conc<=upper_limit), aes(x=conc,y=X97.5./norm_factor,color="interval"),lwd=1)+
+  geom_hline(yintercept=component1$coff/norm_factor, linetype="dashed", color="gray34",linewidth=1) +
+  scale_color_manual(values=c(samples="#be548f",interval="#8f3668"),labels=c(samples="Bootstrap Resamples",interval="95% Confidence Interval"))+
+  labs(title="Bootstrapped MP") +
+  theme(legend.title=element_blank(),
         legend.background = element_rect(fill=NA),
         legend.text = element_text(size=8),
         legend.justification = c(0,1),
@@ -719,36 +824,131 @@ p_ia_4 <- p_ia_4 +
         legend.key.width = unit(4, "mm"),
         legend.key.height = unit(2, "mm")) + 
   guides(color = guide_legend(override.aes = list(linewidth = 2)))
-# print(p_ia_4)
+```
+
+## MP model Bayesian implementation
+```{r, results="hide"}
+# compute full curve MP Bayesian 95% credible interval
+indices <- sample(1:10000, num_sample, replace=F)
+# select most potent single chemical bootstrapped parameters
+if (which.min(single_chems$acc)==1){
+  bayesparams <- comp1_bayesparams
+} else {
+  bayesparams <- comp2_bayesparams
+}
+single_curve_bayes <- sapply(indices, toxcast_model,
+                      dat=potent_sing,params=bayesparams,
+                      XX=x_vals,sample=TRUE)
+single_bayesint <- apply(single_curve_bayes, 1, quantile,
+                             prob=c(0.025,0.975), na.rm=TRUE)
+single_bayesint_ex <- data.frame(conc=x_vals,t(single_bayesint))
+
+# Compute Bayesian samples around ACC only
+acc_bayes_single <- rep(NA,num_sample)
+for (ss in 1:num_sample){
+  params <- bayesparams[indices[ss],]
+  top_val <- single_curve_top(dat=potent_sing,params=params)
+  min_val <- min(single_curve_bayes[,ss],na.rm=T)
+  if (top_val<0){
+    acc_bayes_single[ss] <- NA
+  } else {
+    if (top_val<potent_sing$coff){
+      if (potent_sing$modl %in% c("poly1","pow","exp2","exp3")){
+        acc_bayes_single[ss] <- single_curve_inv(y=potent_sing$coff,params=params,single_dat=potent_sing)
+      } else if(single_dat$modl=='poly2'){
+        # all poly2 curves can extend except for the concave down increasing
+        if (!(params$a<0 & params$b<0)){
+          acc_bayes_single[ss] <- single_curve_inv(y=potent_sing$coff,params=params,single_dat=potent_sing)
+        } else{
+          acc_bayes_single[ss] <- 10000
+        }
+      } else {
+        acc_bayes_single[ss] <- 10000
+      }
+    } else if (min_val>potent_sing$coff){
+      acc_bayes_single[ss] <- -10000
+    } else{
+      acc_bayes_single[ss] <- single_curve_inv(y=potent_sing$coff,params=params,single_dat=potent_sing)
+
+    }
+  }
+}
+# compute full curve MP Bayesian 95% prediction interval
+single_pred_curve <- sapply(indices,single_curve_pred,curve_dat=potent_sing,params_sample=bayesparams,XX=x_vals)
+single_predint <- apply(single_pred_curve, 1, quantile, prob=c(0.025,0.975), na.rm=TRUE)
+single_predint_ex <- data.frame(conc=x_vals,t(single_predint))
+
+# set number of Bayesian curves to plot
+num_plot <- 100
+# plot 95% credible interval
+p3_mp <- p_outline
+
+for(jj in 1:num_plot){
+  plot_data <- subset(data.frame(resp=single_curve_bayes[,jj],conc=x_vals),conc<=upper_limit)
+  p3_mp <- p3_mp +
+    geom_line(data=plot_data,aes(x=conc,y=resp/norm_factor,color="samples"),alpha=0.05)
+}
+p3_mp <- p3_mp +
+  geom_line(data=subset(single_bayesint_ex,conc<=upper_limit), aes(x=conc,y=X2.5./norm_factor,color="interval"),lwd=1)+
+  geom_line(data=subset(single_bayesint_ex,conc<=upper_limit), aes(x=conc,y=X97.5./norm_factor,color="interval"),lwd=1)+
+  geom_hline(yintercept=component1$coff/norm_factor, linetype="dashed", color="gray34",linewidth=1) +
+  scale_color_manual(values=c(samples="#be548f",interval="#8f3668"),labels=c(samples="Bayesian Samples",interval="95% Credible Interval"))+
+  labs(title="Bayesian Approach MP") +
+  theme(legend.title=element_blank(),
+        legend.background = element_rect(fill=NA),
+        legend.text = element_text(size=8),
+        legend.justification = c(0,1),
+        legend.position = "inside",
+        legend.position.inside=c(0.01,0.99),
+        legend.key.width = unit(4, "mm"),
+        legend.key.height = unit(2, "mm")) + 
+  guides(color = guide_legend(override.aes = list(linewidth = 2)))
+
+# plot 95% prediction interval
+p4_mp <- p_outline
+
+for(jj in 1:num_plot){
+  plot_data <- subset(data.frame(resp=single_pred_curve[,jj],conc=x_vals))
+  p4_mp <- p4_mp +
+    geom_line(data=plot_data,aes(x=conc,y=resp/norm_factor,color="samples"),alpha=0.3)
+}
+p4_mp <- p4_mp +
+  geom_line(data=single_predint_ex, aes(x=conc,y=X2.5./norm_factor,color="interval"),lwd=1)+
+  geom_line(data=single_predint_ex, aes(x=conc,y=X97.5./norm_factor,color="interval"),lwd=1)+
+  geom_hline(yintercept=component1$coff/norm_factor, linetype="dashed", color="gray34",linewidth=1) +
+  scale_color_manual(values=c(samples="#be548f",interval="#8f3668"),labels=c(samples="Bayesian Predictive Samples",interval="95% Prediction Interval"))+
+  labs(title="Bayesian Prediction Interval MP") +
+  theme(legend.title=element_blank(),
+        legend.background = element_rect(fill=NA),
+        legend.text = element_text(size=8),
+        legend.justification = c(0,1),
+        legend.position = "inside",
+        legend.position.inside=c(0.01,0.99),
+        legend.key.width = unit(4, "mm"),
+        legend.key.height = unit(2, "mm"),
+        legend.margin = margin(0.1,0.1,0.1,0.1, unit='mm')) + 
+  guides(color = guide_legend(override.aes = list(linewidth = 2)))
   
 ```
 
-Plot all IA methods together
+## Plot all MP methods together
 ```{r}
-# plot(p1_ia)
-# print(p_ia_2)
-# print(p_ia_3)
-plot_grid(p1_ia,p_ia_2,p_ia_3,p_ia_4,nrow=2,ncol=2)
+plot_grid(p1_mp,p2_mp,p3_mp,p4_mp,nrow=2,ncol=2)
 ```
 
-# Most Potent Single Component (MP)
-
-## Model
-
-Mixtures is treated as being made up 100% of the most potent single chemical component. The most potent chemical component is selected as the component with the lower activity concentration at the cutoff (ACC), which is the selected point of departure.
-
-## Example
-
-# Compare Models to Observed Mixture
+# Observed Mixture Concentration-Response {.tabset}
 
 ## Fit the observed mixture concentration-response
+
 Obtain the observed mixture tcplfit2 best fit model, bootstrapped 95% confidence interval, and Bayesian 95% credible interval
-```{r}
+
+```{r, results="hide"}
 # tcplfit2 best fit response
 mix_info <- mc5 %>% filter(m4id == m4id_mix)
 mix_info$m4id_mix <- m4id_mix
+acc_mix <- mix_info$acc
 # bootstrap resampling of observed mixture
-mix_bootparams <- curve_bootstrap(curve.info=mix_info, boot_num=1000, type="mix")
+mix_bootparams <- curve_bootstrap(curve.info=mix_info, boot_num=500, type="mix")
 x_vals <- 10^seq(log10(0.01*mix_info$conc_min),log10(3*mix_info$conc_max),length.out=num_pts)
 # bootstrap 95% confidence interval on concentration-response
 mix_curve <- sapply(c(1:nrow(mix_bootparams)), toxcast_model,
@@ -787,8 +987,8 @@ for (ss in 1:nrow(mix_bootparams)){
 mix_acc_boot <- acc
 
 # Bayesian approach to fitting the observed mixture concentration-response
-mix_bayesparams <- bayes_curve(curve.info=mix_info, n_iter=10000, n_burn=2000,
-                               type="mix", poly2_correct=FALSE, tc=FALSE)
+mix_bayesparams <- bayes_curve(curve.info=mix_info, n_iter=10000, n_burn=10000,
+                               type="mix", poly2_correct=FALSE)
 indices <- sample(1:10000, num_sample, replace=F)
 mix_curve <- sapply(indices, toxcast_model,
                     dat=mix_info,params=mix_bayesparams,XX=x_vals,sample=TRUE)
@@ -827,366 +1027,254 @@ for (ss in 1:num_sample){
 mix_acc_bayes <- acc
 ```
 
+# Compare Models to Observed Mixture {.tabset}
+
 ## Visual comparison of models to observed mixture
 
+The CA, IA, and MP mixture models are compared to the observed mixture concentration-response for the full curves and for the activity concentration at the cutoff (ACC), shown by the dashed horizontal line. The Bayesian approach is shown for the IA model only as an example for simplicity.
+
 ```{r}
-p_compare <- plotint.func(index=ex_index,tc=FALSE) +
-                      guides(color=guide_legend(override.aes=list(lwd=2,size=4)),
-                      fill=guide_legend(override.aes=list(lwd=0.5))) + 
-                      theme_bw(base_size=16) +
-  theme(legend.title=element_blank(),
-        legend.text = element_text(size=12),
-        legend.background = element_rect(fill=NA),
-        legend.margin = margin(0.1,0.1,0.1,0.1, unit='cm'),
-        legend.justification = c(0,1),
-        legend.position = "inside",
-        legend.position.inside=c(0.01,0.99),
-        legend.key.width = unit(1, "cm"),
-        legend.key.height = unit(0.2, "cm"),
-        legend.spacing.y = unit(-0.3, "cm"),
-        axis.text = element_text(color="black"),
-        plot.margin = margin(t=1, r=1.5,b=0,l=1.5, unit = "cm"),
-        plot.title = element_blank())
+p1 <- ggplot_build(plotlines.func(index=ex_index,mix_input=mix.info.tc,tc=TRUE) +
+                      guides(color=guide_legend(override.aes=list(lwd=0.5,size=1))) + 
+                      labs(title="Best fit from tcplfit2")+
+                      theme(legend.title=element_blank(),
+                            legend.text = element_text(size=7),
+                            legend.background = element_rect(fill=NA),
+                            legend.margin = margin(0.1,0.1,0.1,0.1, unit='mm'),
+                            legend.justification = c(0,1),legend.position = "inside",
+                            legend.position.inside=c(0.01,0.99),
+                            legend.key.width = unit(6, "mm"),
+                            legend.key.height = unit(2, "mm"),
+                            axis.text = element_text(color="black"),
+                            plot.margin = margin(t=0.1, r=5,b=0,l=5, unit = "cm"),
+                            plot.title = element_text(hjust=0.5,size=12,face="bold")))
+p1$data[[1]]$linewidth <- 0.5
+p1$data[[2]]$linewidth <- 0.5
+p1$data[[3]]$linewidth <- 0.5
+p1$data[[4]]$linewidth <- 0.5
+p1$data[[5]]$linewidth <- 0.5
+p1$data[[6]]$size <- 1
+p1 <- ggplot_gtable(p1)
 
-acc_ca_density <- density(mix.results.acc$acc_boot_ca.tc[[ex_index]])
-acc_mix_density <- density(mix.results.acc$acc_boot_mix[[ex_index]])
-p3 <- p3 +
-  geom_line(data=data.frame(x=acc_ca_density$x,y=acc_ca_density$y),aes(x=x,y=((y)+(cutoff/norm_factor))),color="darkorange3",lwd=1.25)+
-  annotate("text", x=mix.results.acc$acc_ca.tc[ex_index]+30, y=cutoff/norm_factor+0.12, label='bold(ACC[Model-CA])',
-           parse=TRUE,angle=0,size=4,color="darkorange3")+
-  geom_line(data=data.frame(x=acc_mix_density$x,y=acc_mix_density$y),aes(x=x,y=((y)+(cutoff/norm_factor))),color="black",lwd=1.25)+
-  annotate("text", x=mix.results.acc$acc_mix[ex_index], y=cutoff/norm_factor+0.28, label='bold(ACC[Obs])',
-           parse=TRUE,angle=0,size=4,color="black")+
-  annotate("text",x=0.13,y=cutoff/norm_factor+0.04,label="Cutoff",size=4,color="black")
+p2 <- ggplot_build(plotint.func(index=ex_index,tc=TRUE) +
+                      guides(color=guide_legend(override.aes=list(lwd=0.5,size=1)),
+                             fill=guide_legend(byrow = TRUE,override.aes=list(lwd=0.5))) +
+                     labs(title="Bootstrapped Approach")+
+                      theme_bw(base_size=10) +
+                      theme(legend.title=element_blank(),
+                            legend.text = element_text(size=7),
+                            legend.background = element_rect(fill=NA),
+                            legend.margin = margin(0.1,0.1,0.1,0.1, unit='mm'),
+                            legend.justification = c(0,1),
+                            legend.position = "inside",
+                            legend.position.inside=c(0.01,0.99),
+                            legend.key.width = unit(8, "mm"),
+                            legend.key.height = unit(3, "mm"),
+                            legend.spacing.y = unit(-0.1, "mm"),
+                            axis.text = element_text(color="black"),
+                            plot.margin = margin(t=0.1, r=5,b=0,l=5, unit = "cm"),
+                            plot.title = element_text(hjust=0.5,size=12,face="bold")))
+p2$data[[1]]$linewidth <- 0.5
+p2$data[[2]]$linewidth <- 0.5
+p2$data[[3]]$linewidth <- 0.5
+p2$data[[4]]$linewidth <- 0.5
+p2$data[[5]]$linewidth <- 0.5
+p2$data[[6]]$linewidth <- 0.5
+p2$data[[7]]$size <- 1
+p2 <- ggplot_gtable(p2)
 
-p3_new <- ggplot_build(p3)
-p3_new$data[[1]]$linewidth <- 0.5
-p3_new$data[[2]]$linewidth <- 0.5
-p3_new$data[[3]]$linewidth <- 1.5
-p3_new$data[[4]]$size <- 2
-p3_new_plot <- ggplot_gtable(p3_new)
-plot(p3_new_plot)
+p3 <- ggplot_build(plotbayesintia.func(index=ex_index,tc=TRUE) +
+                      guides(color=guide_legend(override.aes=list(lwd=0.5,size=1))) + 
+                      theme_bw(base_size=10) +
+                     labs(title="IA Bayesian Approach")+
+                      theme(legend.title=element_blank(),
+                            legend.text = element_text(size=7),
+                            legend.background = element_rect(fill=NA),
+                            legend.margin = margin(0.1,0.1,0.1,0.1, unit='mm'),
+                            legend.justification = c(0,1),
+                            legend.position = "inside",
+                            legend.position.inside=c(0.01,0.99),
+                            legend.key.width = unit(8, "mm"),
+                            legend.key.height = unit(3, "mm"),
+                            legend.spacing.y = unit(-0.1, "mm"),
+                            axis.text = element_text(color="black"),
+                            plot.margin = margin(t=0.1, r=5,b=0,l=5, unit = "cm"),
+                            plot.title = element_text(hjust=0.5,size=12,face="bold")))
+
+p3$data[[3]]$linewidth <- 0.5
+p3$data[[4]]$size <- 1
+p3$data[[5]]$linewidth <- 0.5
+p3 <- ggplot_gtable(p3)
+
+
+plot_grid(p1, p2, p3, nrow=3)
+
 ```
 
 ## Quality-of-Fit Metrics
 
+### Activity Concentration at the Cutoff (ACC) Comparison
 
-## Implementation for full curve
+A difference metric, $D_{log_{10}(ACC)}$, was defined to compare the observed ACC derived directly from the observed mixture concentration-response curve ($ACC_{obs}$) and the ACC from the mixture model ($ACC_{model}$). 
 
-## Implementation for one response value
-
-The ACC for the CA model is calculated directly from the ACC values of the component curves because the CA model results in a concentration for a given response level.
+$$
+D_{log_{10}(ACC)}=log_{10}(ACC_{obs})-log_{10}(ACC_{model})
+$$
+For the mixture models derived with single component concentration-responses from tcplfit2 best fits, whether or not an accurate $ACC_{model}$ prediction is obtained is determined by testing if $-0.5 \leq D_{log_{10}(ACC)} \leq 0.5$. Whether or not a conservative $ACC_{model}$ prediction from tcplfit2 best fit components is obtained is determined by testing if $-0.5 \leq D_{log_{10}(ACC)}$.
 
 ```{r}
-ex_index <- 54
-cutoff <- subset(mc5_attg_endpts, m4id == mix.results.all$m4id_mix[ex_index])$coff
-norm_factor <- subset(mix.info.tc, m4id_mix == mix.results.all$m4id_mix[ex_index])$edpt_top
-p2_og <- ggplot_build(plotlines.func(index=ex_index,tc=TRUE) +
-                      guides(color=guide_legend(override.aes=list(lwd=2,size=4))) + 
-                      geom_errorbarh(aes(xmax=mix.results.acc$acc_ca.tc[ex_index],
-                                         xmin=mix.results.acc$acc_mix[ex_index],
-                                         y=cutoff/norm_factor,height=0.1),color="red",lwd=1.5)+
-                      # add annotation for ACC_model
-                      geom_vline(xintercept=mix.results.acc$acc_ca.tc[ex_index],color="red",lty=2,lwd=1.25)+
-                      # geom_segment(aes(x=mix.results.acc$acc_ca.tc[ex_index],
-                      #                  xend=mix.results.acc$acc_ca.tc[ex_index],
-                      #                  y=-0.2,yend=cutoff/norm_factor),color="red",lty=2,lwd=1.25)+
-                      annotate("text", x=mix.results.acc$acc_ca.tc[ex_index]+17, y=-0.05, label='bold(ACC[Model-CA])', parse=TRUE,angle=0,size=4)+
-                      # add annotation for ACC_mix
-                      geom_vline(xintercept=mix.results.acc$acc_mix[ex_index],color="red",lty=2,lwd=1.25)+
-                      # geom_segment(aes(x=mix.results.acc$acc_mix[ex_index],
-                      #                  xend=mix.results.acc$acc_mix[ex_index],
-                      #                  y=-0.2,yend=cutoff/norm_factor),color="red",lty=2,lwd=1.25)+
-                      annotate("text", x=mix.results.acc$acc_mix[ex_index]-3, y=-0.05, label='bold(ACC[Obs])', parse=TRUE,angle=0,size=4)+
-                      theme_bw(base_size=16) + theme(legend.title=element_blank(),
-                                                     legend.text = element_text(size=14),
-                                                     legend.background = element_rect(fill=NA),
-                                                     legend.margin = margin(0.1,0.1,0.1,0.1, unit='cm'),
-                                                     legend.justification = c(0,1),
-                                                     legend.position = "inside",
-                                                     legend.position.inside=c(0.01,0.99),
-                                                     legend.key.width = unit(2, "cm"),
-                                                     legend.key.height = unit(0.3, "cm"),
-                                                     axis.text = element_text(color="black"),
-                                                     plot.margin = margin(t=1, r=1.5,b=0,l=1.5, unit = "cm"),
-                                                     plot.title = element_blank()))
-p2_og$data[[1]]$linewidth <- 1.5
-p2_og$data[[2]]$linewidth <- 1.5
-p2_og$data[[3]]$linewidth <- 1.5
-p2_og$data[[4]]$linewidth <- 1.5
-p2_og$data[[5]]$linewidth <- 1.5
-p2_og$data[[6]]$size <- 3
-p2 <- ggplot_gtable(p2_og)
-plot(p2)
+acc_obs <- subset(mc5,m4id == m4id_mix)$acc
+print(paste0("CA: D =", round(log10(acc_obs-acc_ca),3), ", Accurate and Conservative"))
+print(paste0("IA: D = ", round(log10(acc_obs-acc_ia),3), ", Accurate and Conservative"))
+print(paste0("MP: D = ", round(log10(acc_obs-acc_mp),3), ", Accurate and Conservative"))
 ```
 
-## Bootstrap CA implementation
-```{r}
-ii <- 1 # index of example
-num_pts <- 200
-num_sample <- 1000
-# Compute full curves for legacy ToxCast data
-mix_info <- mix.info.tc[mix.info.tc$m4id_mix==mix.results.all$m4id_mix[ii],]
-comp1 <- mc5[m4id==mix_info$m4id_1]
-comp2 <- mc5[m4id==mix_info$m4id_2]
-# pull mixtures observed data points for CA prediction interval calculation
-mix_dat <- mc3 %>% filter(m3id %in% mc4_agg$m3id[which(mc4_agg$m4id==mix_info$m4id_mix)])
-# if curve is poly2 and concave up (negative in concentration range), then replace with alternative curve shape
-if (comp1$hitc >= 0.9 & comp1$modl=='poly2' & comp1$a>0 & comp1$b<0){
-  params1 <- poly2_new_modl[m4id==mix_info$m4id_1,]
-  bootparams1 <- poly2_new_modl[m4id==mix_info$m4id_1,]$bootparams[[1]]
-  bayesparams1 <- poly2_new_modl[m4id==mix_info$m4id_1,]$bayesparams[[1]]
-  comp1$modl <- poly2_new_modl[m4id==mix_info$m4id_1,]$modl
-} else {
-  params1 <- comp1
-  bootparams1 <- subset(single.info.tc,m4id==mix_info$m4id_1)$bootparams[[1]]
-  bayesparams1 <- subset(single.info.tc,m4id==mix_info$m4id_1)$bayesparams[[1]]
-}
-if (comp2$hitc >= 0.9 & comp2$modl=='poly2' & comp2$a>0 & comp2$b<0){
-  params2 <- poly2_new_modl[m4id==mix_info$m4id_2,]
-  bootparams2 <- poly2_new_modl[m4id==mix_info$m4id_2,]$bootparams[[1]]
-  bayesparams2 <- poly2_new_modl[m4id==mix_info$m4id_2,]$bayesparams[[1]]
-  comp2$modl <- poly2_new_modl[m4id==mix_info$m4id_2,]$modl
-} else {
-  params2 <- comp2
-  bootparams2 <- subset(single.info.tc,m4id==mix_info$m4id_2)$bootparams[[1]]
-  bayesparams2 <- subset(single.info.tc,m4id==mix_info$m4id_2)$bayesparams[[1]]
-}
-cfrac1 <- mix_info$cfrac_1
-cfrac2 <- mix_info$cfrac_2
-comp1_min <- single_curve_min(dat=comp1,params=params1) + 1E-20 # add to avoid zero
-comp1_top <- single_curve_top(dat=comp1,params=params1) # top within concentration range, not true top
-# set to small positive number if the minimum is negative. This happend for a concave up poly2 curve 
-if (comp1_min < 0){
-  comp1_min <- 1E-20
-}
-comp2_min <- single_curve_min(dat=comp2,params=params2) + 1E-20 # add to avoid zero
-comp2_top <- single_curve_top(dat=comp2,params=params2) # top within concentration range, not true top
-if (comp2_min <0){
-  comp2_min <- 1E-20
-}
-# set-up y-values to calculate CA line and x-values to calculate IA model
-if(comp1$hitc>=0.9 & comp2$hitc<0.9){
-  # put response values from minimum response (~0) to the cutoff on a log scale and the rest with even spacing to get good coverage of points
-  y_vals <- c(10^seq(log10(comp1_min),log10(mix_info$coff),length.out=(2*num_pts/3)),seq(mix_info$coff+0.01,comp1_top,length.out=(num_pts/3)))
-}else if(comp2$hitc>=0.9 & comp1$hitc<0.9){
-  # put response values from minimum response (~0) to the cutoff on a log scale and the rest with even spacing to get good coverage of points
-  y_vals <- c(10^seq(log10(comp2_min),log10(mix_info$coff),length.out=(2*num_pts/3)),seq(mix_info$coff+0.01,comp2_top,length.out=(num_pts/3)))
-}else if(comp1$hitc>=0.9 & comp2$hitc>=0.9){
-  # put response values from minimum response (~0) to the cutoff on a log scale and the rest with even spacing to get good coverage of points
-  y_vals <- c(10^seq(log10(max(comp1_min,comp2_min)),log10(mix_info$coff),length.out=(2*num_pts/3)),
-              seq(mix_info$coff+0.01,max(comp1_top,comp2_top),length.out=(num_pts/3)))
-}
-# compute full curve CA bootstrap 95% confidence interval
-num_cols <- min(nrow(bootparams1),nrow(bootparams2))
-ca_boot <- sapply(1:num_cols,ca_full_conc,YY=y_vals,comp1=comp1,comp2=comp2,
-               params1=bootparams1,params2=bootparams2,cfrac1=cfrac1,cfrac2=cfrac2,
-               condition1=mix_info$condition1,condition2=mix_info$condition2,
-               sample=TRUE)
-# could select a different type of quantile. (ex. Choose so that -10000 or 10000 is never selected)
-ca_bootint <- apply(ca_boot, 1, quantile, prob=c(0.025,0.975), na.rm=TRUE)
-ca_mean <- apply(ca_boot,1,mean,na.rm=TRUE)
-ca_bootint_ex <- data.frame(resp=y_vals,mean=ca_mean,t(ca_bootint))
+For the bootstrap resampled mixture models, the 95% confidence intervals around the $ACC_{model}$ and $ACC_{obs}$ are used to evaluate the model performance. If the $ACC_{model}$ and $ACC_{obs}$ intervals overlap, the model is considered an accurate representation of the observed mixture. 
 
-# Compute boostrap samples around ACC only
-acc_boot_ca_ex <- sapply(1:num_cols,ca_point_conc,YY=comp1$coff,comp1=comp1,
-                         comp2=comp2,params1=bootparams1,params2=bootparams2,
-                         cfrac1=cfrac1,cfrac2=cfrac2,condition1=mix_info$condition1,
-                         condition2=mix_info$condition2,sample=TRUE)
-```
 
-Plot example bootstrap resampled curves
+TO evalute if the model ACC is conservative, the lower 95% confidence interval bounds are input to the difference metric
+$$
+D_{log_{10}(L95 \text{-}ACC)}=log_{10}(L95 \text{-}ACC_{obs})-log_{10}(L95 \text{-}ACC_{model})
+$$
+If $-0.5 \leq D_{log_{10}(L95 \text{-}ACC)}$, the model is said to provide a conservative prediction for the observed mixture within a -0.5 tolerance on a log10 scale.
+
 ```{r}
-ex_index <- ii
-coff <- subset(mc5, m4id == mix.results.all$m4id_mix[ex_index])$coff
-# norm_factor <- subset(mix.info.tc, m4id_mix == mix.results.all$m4id_mix[ex_index])$edpt_top
-# set x-axis limits
-lower_limit <- min(mix_dat$conc)
-upper_limit <- max(mix_dat$conc)
-p1 <- ggplot() +
-  theme_bw(base_size=16) +
-  # plot 95% confidence interval
-  geom_line(data=subset(ca_bootint_ex,X2.5.>=0), aes(x=X2.5.,y=resp/norm_factor),color="black",lwd=1)+
-  geom_line(data=subset(ca_bootint_ex,X97.5.<=1000), aes(x=X97.5.,y=resp/norm_factor),color="black",lwd=1)+
-  geom_hline(yintercept=coff/norm_factor, linetype=2, color="gray34") +
-  geom_point(data = mix_dat, aes(x = mix_dat$conc, y = mix_dat$resp/norm_factor), color="black",shape=19, size=1) + 
-  scale_x_log10(labels = label_number(drop0trailing = TRUE))+
-  coord_cartesian(xlim=c(lower_limit,upper_limit))+
-  theme(legend.title=element_blank(),
-        legend.text = element_text(size=14),
-        legend.background = element_rect(fill=NA),
-        legend.margin = margin(0.1,0.1,0.1,0.1, unit='cm'),
-        legend.justification = c(0,1),
-        legend.position = "inside",
-        legend.position.inside=c(0.01,0.99),
-        legend.key.width = unit(2, "cm"),
-        legend.key.height = unit(0.3, "cm"),
-        axis.text = element_text(color="black"),
-        plot.margin = margin(t=1, r=1.5,b=0,l=1.5, unit = "cm"),
-        plot.title = element_blank())
-for(jj in 1:num_cols){
-  plot_data <- subset(data.frame(resp=y_vals/norm_factor,conc=ca_boot[,jj]),conc>=0 & conc<=1000)
-  p1 <- p1 +
-    geom_line(data=plot_data,aes(x=conc,y=resp),color="orange",alpha=0.2)
-}
-print(p1)
+lo.obs <- quantile(mix_acc_boot,probs=c(0.025),na.rm=TRUE)
+hi.obs <- quantile(mix_acc_boot,probs=c(0.975),na.rm=TRUE)
+lo.ca <- quantile(acc_boot_ca_ex,probs=c(0.025),na.rm=TRUE)
+hi.ca <- quantile(acc_boot_ca_ex,probs=c(0.975),na.rm=TRUE)
+lo.ia <- quantile(acc_boot_ia,probs=c(0.025),na.rm=TRUE)
+hi.ia <- quantile(acc_boot_ia,probs=c(0.975),na.rm=TRUE)
+lo.mp <- quantile(acc_boot_single,probs=c(0.025),na.rm=TRUE)
+hi.mp <- quantile(acc_boot_single,probs=c(0.975),na.rm=TRUE)
+
+
+boot_int_results <- data.frame(name=c("Observed","CA","IA","MP"),
+                               L95=round(c(lo.obs,lo.ca,lo.ia,lo.mp),2),
+                               U95=round(c(hi.obs,hi.ca,hi.ia,hi.mp),2),
+                               Overlap=c(NA,(lo.obs <= lo.ca & hi.obs >= lo.ca)|
+                                           (lo.obs <= hi.ca & hi.obs >= hi.ca)|
+                                           (lo.ca <= lo.obs & hi.ca >= lo.obs)|
+                                           (lo.ca <= hi.obs & hi.ca >= hi.obs),
+                                         (lo.obs <= lo.ia & hi.obs >= lo.ia)|
+                                           (lo.obs <= hi.ia & hi.obs >= hi.ia)|
+                                           (lo.ia <= lo.obs & hi.ia >= lo.obs)|
+                                           (lo.ia <= hi.obs & hi.ia >= hi.obs),
+                                         (lo.obs <= lo.mp & hi.obs >= lo.mp)|
+                                           (lo.obs <= hi.mp & hi.obs >= hi.mp)|
+                                           (lo.mp <= lo.obs & hi.mp >= lo.obs)|
+                                           (lo.mp <= hi.obs & hi.mp >= hi.obs)),
+                               Conservative=c(NA,log10(lo.obs)-log10(lo.ca)>= -0.5,
+                                              log10(lo.obs)-log10(lo.ia)>= -0.5,
+                                              log10(lo.obs)-log10(lo.mp)>= -0.5)
+      )
+print(boot_int_results)
 
 ```
 
-# Independent Action (IA)
-## Model
-$$ A_{mix}(c_{mix}) = 1 - \prod_{i=1}^{2}(1-A_i(q_i*c_{mix})) $$
-Most potent single component model
+The 95% credible intervals from the Bayesian approach are evaluated in the same way as the bootstrapped confidence intervals. A model ACC estimate is considered accurate when the modeled and observed intervals overlap
+```{r}
+lo.obs <- quantile(mix_acc_bayes,probs=c(0.025),na.rm=TRUE)
+hi.obs <- quantile(mix_acc_bayes,probs=c(0.975),na.rm=TRUE)
+lo.ca <- quantile(acc_bayes_ca_ex,probs=c(0.025),na.rm=TRUE)
+hi.ca <- quantile(acc_bayes_ca_ex,probs=c(0.975),na.rm=TRUE)
+lo.ia <- quantile(acc_bayes_ia,probs=c(0.025),na.rm=TRUE)
+hi.ia <- quantile(acc_bayes_ia,probs=c(0.975),na.rm=TRUE)
+lo.mp <- quantile(acc_bayes_single,probs=c(0.025),na.rm=TRUE)
+hi.mp <- quantile(acc_bayes_single,probs=c(0.975),na.rm=TRUE)
 
-Bootstrap
-Bayesian
-Bayesian prediction interval
 
-Fit criteria development
+bayes_int_results <- data.frame(name=c("Observed","CA","IA","MP"),
+                               L95=round(c(lo.obs,lo.ca,lo.ia,lo.mp),2),
+                               U95=round(c(hi.obs,hi.ca,hi.ia,hi.mp),2),
+                               Overlap=c(NA,(lo.obs <= lo.ca & hi.obs >= lo.ca)|
+                                           (lo.obs <= hi.ca & hi.obs >= hi.ca)|
+                                           (lo.ca <= lo.obs & hi.ca >= lo.obs)|
+                                           (lo.ca <= hi.obs & hi.ca >= hi.obs),
+                                         (lo.obs <= lo.ia & hi.obs >= lo.ia)|
+                                           (lo.obs <= hi.ia & hi.obs >= hi.ia)|
+                                           (lo.ia <= lo.obs & hi.ia >= lo.obs)|
+                                           (lo.ia <= hi.obs & hi.ia >= hi.obs),
+                                         (lo.obs <= lo.mp & hi.obs >= lo.mp)|
+                                           (lo.obs <= hi.mp & hi.obs >= hi.mp)|
+                                           (lo.mp <= lo.obs & hi.mp >= lo.obs)|
+                                           (lo.mp <= hi.obs & hi.mp >= hi.obs)),
+                               Conservative=c(NA,log10(lo.obs)-log10(lo.ca)>= -0.5,
+                                              log10(lo.obs)-log10(lo.ia)>= -0.5,
+                                              log10(lo.obs)-log10(lo.mp)>= -0.5)
+      )
+print(bayes_int_results)
+```
 
-# Sticking points
-1) +/- 10,000 for CA
-2) +/- 10,000 for IA
+### Full Concentration-Response Comparison
+
+For the mixture models derived with single component concentration-responses from tcplfit2 best fits, the ability of the model to predict the observed concentration-response is evaluated with the residual sum of squares (RSS)
+
+To evaluate the abilities of the mixture models to predict the full concentration-response, the residual sum of squares (RSS) for mixture models derived from the tcplfit2 best fit single components and the tcplfit2 best fits directly to the observed mixture data are compared. A ratio of 1 indicates that the mixture model fits the observed data as well as the direct tcplfit2 best fit and a threshold of 10 is set on this metric to determine which models are representative of the observed mixtures. 
+
+$$
+\frac{RSS_{model}}{RSS_{obs}} \leq 10
+$$
 
 ```{r}
-ii <- 1 # index of example
-num_pts <- 200
-num_sample <- 1000
-# Compute full curves for legacy ToxCast data
-mix_info <- mix.info.tc[mix.info.tc$m4id_mix==mix.results.all$m4id_mix[ii],]
-comp1 <- mc5_attg_endpts[m4id==mix_info$m4id_1]
-comp2 <- mc5_attg_endpts[m4id==mix_info$m4id_2]
-# pull mixtures observed data points for CA prediction interval calculation
-mix_dat <- mc3 %>% filter(m3id %in% mc4_agg$m3id[which(mc4_agg$m4id==mix_info$m4id_mix)])
-# select observed mixture data up to mixture top (monotonic part only) for CA pred int calculation
-mix_model_xvals <- seq(min(mix_dat$conc),max(mix_dat$conc),length.out=500)
-mix_model <- toxcast_model(dat=mc5[m4id==mix_info$m4id_mix,],
-                           params=mc5[m4id==mix_info$m4id_mix,],
-                           XX=mix_model_xvals)
-mix_top_loc <- mix_model_xvals[which.max(mix_model)]
-dat_ca_eval_full <- subset(select(mix_dat,c(conc,resp)), conc<=mix_top_loc)
-# if curve is poly2 and concave up (negative in concentration range), then replace with alternative curve shape
-if (comp1$hitc >= 0.9 & comp1$modl=='poly2' & comp1$a>0 & comp1$b<0){
-  params1 <- poly2_new_modl[m4id==mix_info$m4id_1,]
-  bootparams1 <- poly2_new_modl[m4id==mix_info$m4id_1,]$bootparams[[1]]
-  bayesparams1 <- poly2_new_modl[m4id==mix_info$m4id_1,]$bayesparams[[1]]
-  comp1$modl <- poly2_new_modl[m4id==mix_info$m4id_1,]$modl
-} else {
-  params1 <- comp1
-  bootparams1 <- subset(single.info.tc,m4id==mix_info$m4id_1)$bootparams[[1]]
-  bayesparams1 <- subset(single.info.tc,m4id==mix_info$m4id_1)$bayesparams[[1]]
-}
-if (comp2$hitc >= 0.9 & comp2$modl=='poly2' & comp2$a>0 & comp2$b<0){
-  params2 <- poly2_new_modl[m4id==mix_info$m4id_2,]
-  bootparams2 <- poly2_new_modl[m4id==mix_info$m4id_2,]$bootparams[[1]]
-  bayesparams2 <- poly2_new_modl[m4id==mix_info$m4id_2,]$bayesparams[[1]]
-  comp2$modl <- poly2_new_modl[m4id==mix_info$m4id_2,]$modl
-} else {
-  params2 <- comp2
-  bootparams2 <- subset(single.info.tc,m4id==mix_info$m4id_2)$bootparams[[1]]
-  bayesparams2 <- subset(single.info.tc,m4id==mix_info$m4id_2)$bayesparams[[1]]
-}
-cfrac1 <- mix_info$cfrac_1
-cfrac2 <- mix_info$cfrac_2
-comp1_min <- single_curve_min(dat=comp1,params=params1) + 1E-20 # add to avoid zero
-comp1_top <- single_curve_top(dat=comp1,params=params1) # top within concentration range, not true top
-# set to small positive number if the minimum is negative. This happend for a concave up poly2 curve 
-if (comp1_min < 0){
-  comp1_min <- 1E-20
-}
-comp2_min <- single_curve_min(dat=comp2,params=params2) + 1E-20 # add to avoid zero
-comp2_top <- single_curve_top(dat=comp2,params=params2) # top within concentration range, not true top
-if (comp2_min <0){
-  comp2_min <- 1E-20
-}
-# set-up y-values to calculate CA line and x-values to calculate IA model
-if(comp1$hitc>=0.9 & comp2$hitc<0.9){
-  # put response values from 0-1 on a log scale and the rest with even spacing to get good coverage of points
-  y_vals <- c(10^seq(log10(comp1_min),log10(mix_info$coff),length.out=(2*num_pts/3)),seq(mix_info$coff+0.01,comp1_top,length.out=(num_pts/3)))
-  x_vals <- 10^seq(log10(mc5[m4id==mix.results.all$m4id_mix[ii],]$conc_min),log10(comp1$conc_max/cfrac1),length.out=num_pts)
-  dat_ca_eval <- subset(dat_ca_eval_full,resp<=comp1_top)
-}else if(comp2$hitc>=0.9 & comp1$hitc<0.9){
-  # put response values from 0-1 on a log scale and the rest with even spacing to get good coverage of points
-  y_vals <- c(10^seq(log10(comp2_min),log10(mix_info$coff),length.out=(2*num_pts/3)),seq(mix_info$coff+0.01,comp2_top,length.out=(num_pts/3)))
-  x_vals <- 10^seq(log10(mc5[m4id==mix.results.all$m4id_mix[ii],]$conc_min),log10(comp2$conc_max/cfrac2),length.out=num_pts)
-  dat_ca_eval <- subset(dat_ca_eval_full,resp<=comp2_top)
-}else if(comp1$hitc>=0.9 & comp2$hitc>=0.9){
-  # put response values from 0-1 on a log scale and the rest with even spacing to get good coverage of points
-  y_vals <- c(10^seq(log10(max(comp1_min,comp2_min)),log10(mix_info$coff),length.out=(2*num_pts/3)),
-              seq(mix_info$coff+0.01,max(comp1_top,comp2_top),length.out=(num_pts/3)))
-  x_vals <- 10^seq(log10(mc5[m4id==mix.results.all$m4id_mix[ii],]$conc_min),
-                   log10(min(comp1$conc_max/cfrac1,comp2$conc_max/cfrac2)),
-                   length.out=num_pts)
-  dat_ca_eval <- subset(dat_ca_eval_full,resp<=max(comp1_top,comp2_top))
-}
-# Compute full curve CA line model
-ca_concs <- ca_full_conc(YY=y_vals,comp1=comp1,comp2=comp2,params1=params1,
-                         params2=params2,cfrac1=cfrac1,cfrac2=cfrac2,
-                         condition1=mix_info$condition1,
-                         condition2=mix_info$condition2,sample=FALSE)
+# select observed mixture data to evaluate
+# select concentration up to mixture maximum
+x_vals <- seq(min(mix_dat$conc),max(mix_dat$conc),length.out=500)
+mix_model <- toxcast_model(dat=mix_info,params=mix_info,XX=x_vals)
+mix_top_loc <- x_vals[which.max(mix_model)]
+dat_eval <- subset(mix_dat, conc<=mix_top_loc)
+# select only concentrations where the models are valid
+tol <- 1E-5 # tolerance for comparing equal to (<=)
+dat_eval_ca <- subset(dat_eval,conc<=(max(ca_plot$conc,na.rm=T)+tol))
+dat_eval_ia <- subset(dat_eval,conc<=(max(ia_plot$conc,na.rm=T)+tol))
+dat_eval_mp <- subset(dat_eval,conc<=(max(mp_plot$conc,na.rm=T)+tol))
+# evaluate models at observed concentrations
+ca_y_eval <- ifelse(dat_eval_ca$conc<min(ca_plot$conc,na.rm=TRUE),0,approx(x=ca_plot$conc, y=ca_plot$resp/norm_factor, xout=dat_eval_ca$conc, rule=2,ties="ordered")[[2]])
+ia_y_eval <- approx(x=ia_plot$conc, y=ia_plot$resp, xout=dat_eval_ia$conc, rule=2)[[2]]
+mp_eval <- toxcast_model(dat=potent_sing,params=potent_sing,XX=dat_eval_mp$conc)/norm_factor
+# calculate RSS ratios
+rss_ca <- sum((dat_eval_ca$resp/norm_factor - ca_y_eval)^2)/sum((dat_eval_ca$resp/norm_factor - toxcast_model(dat=mix_info,params=mix_info,XX=dat_eval_ca$conc)/norm_factor)^2)
+rss_ia <- sum((dat_eval_ia$resp/norm_factor - ia_y_eval)^2)/sum((dat_eval_ia$resp/norm_factor - toxcast_model(dat=mix_info,params=mix_info,XX=dat_eval_ia$conc)/norm_factor)^2)
+rss_mp <- sum((dat_eval_mp$resp/norm_factor - mp_eval)^2)/sum((dat_eval_mp$resp/norm_factor - toxcast_model(dat=mix_info,params=mix_info,XX=dat_eval_mp$conc)/norm_factor)^2)
 
-ca_curve_ex <- data.frame(conc=ca_concs,resp=y_vals)
-# compute full curve CA bootstrap 95% confidence interval
-num_cols <- min(nrow(bootparams1),nrow(bootparams2))
-ca_boot <- sapply(1:num_cols,ca_full_conc,YY=y_vals,comp1=comp1,comp2=comp2,
-               params1=bootparams1,params2=bootparams2,cfrac1=cfrac1,cfrac2=cfrac2,
-               condition1=mix_info$condition1,condition2=mix_info$condition2,
-               sample=TRUE)
-# could select a different type of quantile. (ex. Choose so that -10000 or 10000 is never selected)
-ca_bootint <- apply(ca_boot, 1, quantile, prob=c(0.025,0.975), na.rm=TRUE)
-ca_mean <- apply(ca_boot,1,mean,na.rm=TRUE)
-ca_bootint_ex <- list(data.frame(resp=y_vals,mean=ca_mean,t(ca_bootint)))
-# compute full curve CA Bayesian 95% credible interval
-indices <- sample(1:10000, num_sample, replace=F)
-ca_bayes <- sapply(indices,ca_full_conc,YY=y_vals,comp1=comp1,comp2=comp2,
-               params1=bayesparams1,params2=bayesparams2,cfrac1=cfrac1,cfrac2=cfrac2,
-               condition1=mix_info$condition1,condition2=mix_info$condition2,
-               sample=TRUE)
-ca_credint <- apply(ca_bayes, 1, quantile, prob=c(0.025,0.975),na.rm=TRUE)
-ca_bayes_mean <- apply(ca_bayes,1,mean,na.rm=TRUE)
-ca_bayesint_ex <- data.frame(resp=y_vals,mean=ca_bayes_mean,t(ca_credint))
-# calculate CA 95% prediction interval at observed response levels only (to save time and for easier computation)
-dat_ca_eval$capred_lo <- NA
-dat_ca_eval$capred_hi <- NA
-for (zz in 1:nrow(dat_ca_eval)){
-  y_pred_ca <- sapply(indices,ca_point_pred,YY=dat_ca_eval$resp[zz],comp1=comp1,
-                        comp2=comp2,params1_samp=bayesparams1,params2_samp=bayesparams2,
-                        cfrac1=cfrac1,cfrac2=cfrac2,condition1=mix_info$condition1,
-                        condition2=mix_info$condition2)
-  dat_ca_eval$capred_lo[zz] <- quantile(y_pred_ca, prob=c(0.025,0.975), na.rm=TRUE)[1]
-  dat_ca_eval$capred_hi[zz] <- quantile(y_pred_ca, prob=c(0.025,0.975), na.rm=TRUE)[2]
-}
-ca_predint_ex <- dat_ca_eval
-
-# compute full curve IA line model
-ia_resps <- ia_full_resp(val=x_vals,comp1=comp1,comp2=comp2,params1=params1,params2=params2,
-                         cfrac1=cfrac1,cfrac2=cfrac2,condition1=mix_info$condition1,
-                         condition2=mix_info$condition2,norm_factor=mix_info$edpt_top,sample=FALSE)
-ia_curve_ex <- data.frame(conc=x_vals,resp=ia_resps)
-# compute full curve IA bootstrap 95% confidence interval
-ia_boot <- sapply(c(1:min(nrow(bootparams1),nrow(bootparams2))),ia_full_resp,
-                   val=x_vals,comp1=comp1,comp2=comp2,params1=bootparams1,
-                   params2=bootparams2,cfrac1=mix_info$cfrac_1,cfrac2=mix_info$cfrac_2,
-                   condition1=mix_info$condition1,condition2=mix_info$condition2,
-                   norm_factor=mix_info$edpt_top,sample=TRUE)
-ia_bootint <- apply(ia_boot, 1, quantile, prob=c(0.025,0.975), na.rm=TRUE)
-ia_mean <- apply(ia_boot,1,mean,na.rm=TRUE)
-ia_boot_ex <- data.frame(conc=x_vals,mean=ia_mean,t(ia_bootint))
-# compute full curve IA Bayesian 95% credible interval
-ia_bayes <- sapply(indices,ia_full_resp,
-                   val=x_vals,comp1=comp1,comp2=comp2,params1=bayesparams1,
-                   params2=bayesparams2,cfrac1=mix_info$cfrac_1,cfrac2=mix_info$cfrac_2,
-                   condition1=mix_info$condition1,condition2=mix_info$condition2,
-                   norm_factor=mix_info$edpt_top,sample=TRUE)
-ia_credint <- apply(ia_bayes, 1, quantile, prob=c(0.025,0.975), na.rm=TRUE)
-ia_bayes_mean <- apply(ia_bayes,1,mean,na.rm=TRUE)
-ia_bayesint_ex <- data.frame(conc=x_vals,mean=ia_bayes_mean,t(ia_credint))
-# compute full curve IA Bayesian 95% prediction interval
-ia_pred_curve <- sapply(indices, ia_full_pred, comp1=comp1,comp2=comp2,
-                   cfrac1=cfrac1,cfrac2=cfrac2,params1=bayesparams1,
-                   params2=bayesparams2,norm_factor=mix_info$edpt_top, x_vals=x_vals,
-                   condition1=mix_info$condition1,condition2=mix_info$condition2)
-# get prediction interval
-iapred_int <- apply(ia_pred_curve, 1, quantile, prob=c(0.025,0.975), na.rm=TRUE)
-ia_predint_ex <- data.frame(conc=x_vals,t(iapred_int))
+print(paste0("RSS ratio CA = ",round(rss_ca,3)))
+print(paste0("RSS ratio IA = ",round(rss_ia,3)))
+print(paste0("RSS ratio MP = ",round(rss_mp,3)))
 ```
+
+
+For the 95% bootstrapped confidence intervals around the modeled mixture concentration response, the performance can be evaluated by testing for interval overlap between the modeled intervals from the single components and the intervals from a direct bootstrap resampling procedure applied to the observed data. The 95% intervals are tested for overlap between the observed and modeled response intervals at each screened mixture cocnentration point. The bootstrap interval results are shown here, but the same procedure could be repeated for the 95% Bayesian credible intervals.
+
+```{r}
+# CA overlap
+ca_eval_concs <- unique(subset(dat_eval, conc<=(min(max(ca_bootint_ex$X2.5., na.rm=TRUE),
+                                             max(ca_bootint_ex$X97.5., na.rm=TRUE))+tol))$conc)
+ca_overlap <- interval_overlap(curve_samples=ca_bootint_ex,
+                               mix_curves=mix_bootint,
+                               eval_concs=ca_eval_concs,norm_factor=norm_factor,
+                               model_type='ca')
+# IA overlap
+ia_eval_concs <- unique(dat_eval_ia$conc)
+ia_overlap <- interval_overlap(curve_samples=ia_bootint_ex,
+                               mix_curves=ia_bootint_ex,
+                               eval_concs=ia_eval_concs,norm_factor=norm_factor,
+                               model_type='ia')
+# MP overlap
+sing_eval_concs <- unique(dat_eval_mp$conc)
+sing_overlap <- interval_overlap(curve_samples=single_bootint_ex,
+                               mix_curves=mix_bootint,
+                               eval_concs=sing_eval_concs,norm_factor=norm_factor,
+                               model_type='single')
+
+```
+
+
+To evaluate the 95% Bayesian prediction intervals, the coverage of the observed mixture data points by the interval is evaluated. 
+
+```{r}
+
+# mp_coverage <- sum(ifelse(dat_eval$resp>=single_predint_ex$X2.5. & dat_eval$resp<=single_predint_ex$X97.5.,1,0))/nrow(dat_eval)
+
+```
+
+
