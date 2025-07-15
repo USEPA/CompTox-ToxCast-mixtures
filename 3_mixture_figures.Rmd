@@ -26,7 +26,8 @@ library(writexl)
 library(ggridges)
 
 # set up connections to ToxCast database
-tcplConf("_dataminer", pass="pass", db="prod_internal_invitrodb_v4_2", drvr="MySQL", host="ccte-mysql-res.dmap-prod.aws.epa.gov")
+# user input needed
+tcplConf(" ", pass=" ", db="prod_internal_invitrodb_v4_2", drvr=" ", host=" ")
 tcplConfList()
 
 # import scripts with functions
@@ -453,7 +454,7 @@ ex_index_3 <- which(mix.results.all$m4id_mix=='12535858')
 p3_og <- ggplot_build(plotlines.func(index=ex_index_3,mix_input=mix.info,tc=FALSE) +
                         guides(color=guide_legend(override.aes=list(lwd=0.5,size=1))) +
                         theme_bw(base_size=12) +
-                        ggtitle('Test Dataest') +
+                        ggtitle('Test Dataset') +
                         theme(legend.title=element_blank(),
                               legend.text=element_text(size=7),
                               legend.background=element_rect(fill=NA),
@@ -478,7 +479,7 @@ p3 <- ggplot_gtable(p3_og)
 p4_og <- ggplot_build(plotlines.func(index=ex_index_3,mix_input=mix.info.tc,tc=TRUE) +
                         guides(color=guide_legend(override.aes=list(lwd=0.5,size=1))) +
                         theme_bw(base_size=12) +
-                        ggtitle('Legacy Dataest') +
+                        ggtitle('Legacy Dataset') +
                         theme(legend.title=element_blank(),
                               legend.text=element_text(size=7),
                               legend.background=element_rect(fill=NA),
