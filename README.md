@@ -21,6 +21,6 @@ All inputs are provided in the "input" folder. All output data are provided in t
 4. Conduct bioactivty:exposure ratio (BER) case study to compare simulated mixtures point of departures to [CDC NHANES](https://www.cdc.gov/nchs/nhanes/index.html) human blood serum exposure concentrations. 
     * File: [4_mixtures_ber_case_study.Rmd](4_mixtures_ber_case_study.Rmd)
 
-A vignette is provided that walks through an example of the full procedure for simulating a mixture model from single chemical components for one example binary mixture.
+A vignette is provided that walks through an example of the full procedure for simulating a mixture model from single chemical components for one example binary mixture:[example_vignette.Rmd](example_vignette.Rmd).
 
 ![Graphical Abstract.](/figures/GraphicalAbstract.png)
