@@ -1,4 +1,5 @@
 # CompTox-ToxCast-mixtures
+
 Development of Mathematical New Approach Methods to Assess Chemical Mixtures
 
 Authors: Broughton RA, Feshuk M, Stanfield Z, Isaacs KK, Paul Friedman K
@@ -24,3 +25,4 @@ All inputs are provided in the "input" folder. All output data are provided in t
 A vignette is provided that walks through an example of the full procedure for simulating a mixture model from single chemical components for one example binary mixture: [example_vignette.Rmd](example_vignette.Rmd).
 
 ![Graphical Abstract.](/figures/GraphicalAbstract.png)
+
