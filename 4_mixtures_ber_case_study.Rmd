@@ -25,7 +25,8 @@ library(gridExtra)
 library(cowplot)
 
 # tcpl database connection
-tcplConf("_dataminer", pass="pass", db="invitrodb", drvr="MySQL", host="ccte-mysql-res.dmap-prod.aws.epa.gov")
+# user input needed
+tcplConf(" ", pass=" ", db="invitrodb", drvr=" ", host=" ")
 tcplConfList()
 
 source("./scripts/mixture_model_functions.R")
