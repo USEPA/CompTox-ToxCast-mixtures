@@ -111,22 +111,8 @@ gnls_inv <- function(y,params,single_dat){
 #' 
 #' @return numeric | top response value of concentration-response curve
 single_curve_top <- function(dat,params){
-  if(dat$modl %in% c('hill','exp4','exp5')){
-    topval <- params$tp
-  # } else if (dat$modl == 'poly2'){
-  #   # extends beyond how ToxCast defines top. Using the whole curve
-  #   if (params$a<0 & params$b<0){
-  #     topval <- -params$a/4
-  #   } else {
-  #     mu <- toxcast_model(dat=dat, params=params, XX=seq(dat$conc_min, dat$conc_max, length.out=500))
-  #     topval <- mu[which.max(abs(mu))]          
-  #   }
-  } else {
-    # if no defined top parameter, top is the largest value in the data range. Do this for gainloss as well because it is easier to calculate
-    # extends beyond how ToxCast defines top for poly2 by using the whole curve
-    mu <- toxcast_model(dat=dat, params=params, XX=seq(dat$conc_min, dat$conc_max, length.out=500))
-    topval <- mu[which.max(abs(mu))]    
-  }
+  mu <- toxcast_model(dat=dat, params=params, XX=seq(dat$conc_min, dat$conc_max, length.out=500))
+  topval <- mu[which.max(abs(mu))]    
   return(topval)
 }
 
@@ -137,7 +123,7 @@ single_curve_top <- function(dat,params){
 #' 
 #' @return numeric | minimum response value of concentration-response curve
 single_curve_min <- function(dat,params){
-  # could change X to only cover data range, but maybe it's okay?
+  # could change X to only cover data range, but use a small concentration to get calculatable minimum
   mu <- toxcast_model(dat=dat, params=params, XX=seq(1E-6, dat$conc_max, length.out=500))
   resp_min <- mu[which.min(abs(mu))]
   return(resp_min)
@@ -611,7 +597,9 @@ single_curve_pred <- function(ss,curve_dat,params_sample,XX){
   }
 }
 
-#' Compute fraction of modeled ACC values that are accurate or conservative based on the difference in log10(ACC) values between the observed and modeled ACC point estimates
+#' Compute fraction of modeled ACC values that are accurate or conservative
+#' based on the difference in log10(ACC) values between the observed and modeled ACC point estimates
+#' Threshold is set to +/- 0.5
 #'
 #' @param results vector| contains metrics for each analyzed mixture of observed ACC - modeled ACC difference for a given mixture model
 #' @param conserv logical | if TRUE, returns fraction of analyzed mixtures with a conservative model estimate. If FALSE, returns fraction of analyzed mixtures with an accurate model estimate
@@ -626,37 +614,20 @@ point_fit_metric <- function(results,conserv=T){
   }
 }
 
-#' Compute number of modeled ACC values that are accurate or conservative based on the confidence/credible intervals around the difference in log10(ACC) values between the observed and modeled ACC distribution
+#' Calculate 95% interval around ACC from boostrapped or Bayesian ACC samples
 #'
-#' @param results vector| contains bootstrap/Bayesian samples from the distribution of the metric of observed ACC - modeled ACC difference for a given mixture model for each analyzed mixture 
-#' @param conserv logical | if TRUE, returns fraction of analyzed mixtures with a conservative model estimate. If FALSE, returns fraction of analyzed mixtures with an accurate model estimate
+#' @param results vector| contains bootstrap or Bayesian ACC samples
 #' 
-#' @return numeric | number of total analyzed mixtures with a conservative or accurate ACC model estimate
-calc_int_metric <- function(results,conserv=TRUE){
-  hi_int <- log10(sapply(results,quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,])
-  lo_int <- log10(sapply(results,quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,])
-  if (conserv){
-    num_pass <- length(hi_int[hi_int >= -0.5 & !is.na(hi_int)])
-  } else {
-    num_pass <- length(hi_int[hi_int>=0 & lo_int<=0 & !is.na(hi_int) & !is.na(lo_int)])
-  }
-  return(num_pass)
+#' @return lower and upper 95% boostrap confidence or Bayesian credible interval bounds
+accint_quantiles <- function(results){
+  # omit + infinity placeholder values (ACC=10000) from interval calculation
+  # results_crop <- ifelse(results==10000,NA, results)
+  int_95 <- quantile(results,probs=c(0.025,0.975),na.rm=TRUE)
+  return(int_95)
 }
 
-#' Compute fraction of observed ACC values that are covered by the prediction interval of a given mixture model for each analyzed mixture
-#'
-#' @param results vector| contains Bayesian prediction interval samples from the modeled ACC values for a given mixture model for each analyzed mixture 
-#' 
-#' @return numeric | fraction of total analyzed mixtures with an ACC model prediction interval that covers the observed ACC value
-calc_predint_metric <- function(results){
-  hi_int <- sapply(results,quantile, probs=c(0.025,0.975),na.rm=TRUE)[2,]
-  lo_int <- sapply(results,quantile, probs=c(0.025,0.975),na.rm=TRUE)[1,]
-  num_pass <- ifelse((hi_int>=mix.results.acc$acc_mix & lo_int<=mix.results.acc$acc_mix & !is.na(hi_int)& !is.na(lo_int)),1,0)
-  cover_rate <- sum(num_pass)/sum(!is.na(hi_int))
-  return(cover_rate)
-}
-
-#' Compute fraction of Residual Sum of Squares (RSS) ratio metrics of RSS_modeled:RSS_observed that fall within a threshold
+#' Compute fraction of Residual Sum of Squares (RSS) ratio metrics of
+#' RSS_modeled:RSS_observed that fall within a threshold
 #' Threshold is set to <=10
 #'
 #' @param results vector| contains metrics for each analyzed mixture of RSS_modeled:RSS_observed for a given mixture model
@@ -668,7 +639,8 @@ rss_fit_metric <- function(results){
 }
 
 
-#' Compute fraction of 95% prediction intervals of the analyzed mixtures that cover the observed data points for a set threshold 
+#' Compute fraction of 95% prediction intervals of the analyzed mixtures that cover
+#' the observed data points for a set threshold 
 #' Threshold is set to 80% coverage
 #'
 #' @param results vector| contains metrics for each analyzed mixture of prediction interval coverage for a given mixture model
@@ -678,16 +650,18 @@ pred_fit_metric <- function(results){
   return(length(results[results>=0.8 & !is.na(results)])/length(results[!is.na(results)]))
 }
 
-#' Compute fraction of the model 95% confidence intervals or 95% credible interval
-#' of the analyzed mixtures that overlap the experimentally-derived mixture confidence/credible intervals at the observed concentrations for a set threshold 
-#' Threshold is set to 80% overlap for the observed concentration values
+#' Compute fraction of the modeled 95% bootstrapped confidence or Bayesian credible intervals
+#' of the analyzed mixtures that overlap the observed mixture confidence/credible intervals
+#' at the observed concentrations for a set threshold. 
+#' Threshold is set to 100% overlap for the observed concentration values
 #'
 #' @param results vector| contains metrics for each analyzed mixture of confidence or credible interval overlap for a given mixture model
 #' 
 #' @return numeric | fraction of total analyzed mixtures with a full curve confidence or credible interval that overlaps with the
 #' experimentally-derived interval for at least 80% of the observed concentration values
 interval_fit_metric <- function(results){
-  return(length(results[results>=0.8 & !is.na(results)])/length(results[!is.na(results)]))
+  return(sum(results==1,na.rm=TRUE)/length(results[!is.na(results)]))
+  # return(length(results[results>=0.8 & !is.na(results)])/length(results[!is.na(results)]))
 }
 
 # Calculate bootstrap confidence intervals or Bayesian credible intervals model overlap with mixture curve intervals
@@ -733,7 +707,7 @@ interval_overlap <- function(curve_samples,mix_curves,eval_concs,norm_factor,mod
   return(overlap)
 }
 
-#' Compute Concentration Addition mixture model for mixtures with 2 or more components at one given response value
+#' Compute Concentration Addition mixture model for mixtures with more than 2 components at one given response value
 #' CA model is not extrapolated and assumes the response value exists on the curve
 #' 
 #' @param YY numeric | given non-normalized response value at which to calculate mixture CA model
